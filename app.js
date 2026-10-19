@@ -75,7 +75,7 @@ function telaRadar() {
     ${o.comprar.map(t => card(t, 'c-c', 'Comprar', `<br><span class="muted">≈ ${brl(R.capital_referencia / R.vagas)}</span>`)).join('')}
     ${o.manter.map(t => card(t, 'c-m', 'Manter')).join('')}
     ${nada ? '<p class="muted">Nenhuma compra ou venda nova. Mantenha as posições.</p>' : ''}
-    ${nada ? '' : '<button class="btn" id="executa">Executar na minha carteira simulada</button>'}
+    ${posicoes(cart()).lista.length === 0 && cart().ops.length === 0 ? '<button class="btn" id="copia">Começar a simulação copiando a carteira do método</button>' : (nada ? '' : '<button class="btn" id="executa">Executar na minha carteira simulada</button>')}
     <button class="btn sec" id="porque">Por que essas ações?</button>
   </section>
   <section class="cartao"><h2>Carteira do método</h2>
@@ -109,6 +109,14 @@ function telaRadar() {
     $('#dlg-ok').onclick = () => $('#dlg').close(); $('#dlg').showModal();
   };
   if ($('#executa')) $('#executa').onclick = () => executaOrdens();
+  if ($('#copia')) $('#copia').onclick = () => copiaMetodo();
+}
+function copiaMetodo() {
+  // compra, em partes iguais, as ações que o método terá no próximo pregão (manter + comprar)
+  const R = D.radar, alvo = [...R.ordens.manter, ...R.ordens.comprar].slice(0, R.vagas); const feitas = [];
+  const fatia = posicoes(cart()).caixa / R.vagas;
+  for (const t of alvo) { const px = preco(t); if (!px) continue; const q = Math.floor(fatia / px.preco); if (q > 0 && registra('C', t, q, px, 'cópia do método')) feitas.push(`Comprou ${q} ${t} a ${brl(px.preco)}`); }
+  alerta(feitas.length ? 'Simulação iniciada:<br>' + feitas.join('<br>') + '<br><br>A partir de agora, siga as ordens diárias com o botão "Executar".' : 'Nada a copiar.');
 }
 function executaOrdens() {
   const R = D.radar, c = cart(); let feitas = [];
