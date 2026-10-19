@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Radar B3</title>
+<meta name="theme-color" content="#0d1b1e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icone-192.png">
+<link rel="apple-touch-icon" href="icone-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+/* Radar B3 — app de bolso: barra inferior de navegação, cartões de ordem com faixa de cor por ação (vender/comprar/manter). */
+:root{--bg:#f2f5f6;--sup:#ffffff;--sup2:#e9eef0;--tinta:#10181c;--tinta2:#4a5862;--apag:#7d8a93;--linha:#dbe2e6;
+ --acento:#0d6b6b;--acento-t:#fff;--compra:#0a8a3a;--venda:#c43131;--mantem:#1f5fb8;--linha-m:#2a78d6;--linha-i:#eb6834;--linha-c:#8a8f98;
+ --fd:"Archivo","Segoe UI",sans-serif;--fb:"IBM Plex Sans","Segoe UI",sans-serif;--fm:"IBM Plex Mono",Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1316;--sup:#121c20;--sup2:#19252a;--tinta:#e7eef1;--tinta2:#a9b8c0;--apag:#73838c;--linha:#24323a;
+ --acento:#3fb3ae;--acento-t:#062221;--compra:#2fbf5a;--venda:#ea6464;--mantem:#5b9cf0;--linha-m:#3987e5;--linha-i:#d95926;--linha-c:#9aa0a8;color-scheme:dark}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tinta);font:15px/1.45 var(--fb)}
+header{position:sticky;top:0;z-index:5;background:var(--sup);border-bottom:1px solid var(--linha);padding:calc(env(safe-area-inset-top,0px) + 12px) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));display:flex;align-items:baseline;gap:10px}
+header h1{font:800 20px var(--fd);margin:0;letter-spacing:-.01em}
+header .sub{font-size:12px;color:var(--apag);margin-left:auto;text-align:right}
+main{padding:14px max(16px,env(safe-area-inset-right,0px)) calc(86px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:14px;max-width:760px;margin:0 auto}
+nav{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--sup);border-top:1px solid var(--linha);display:grid;grid-template-columns:repeat(5,1fr);padding:4px max(6px,env(safe-area-inset-right,0px)) calc(4px + env(safe-area-inset-bottom,0px)) max(6px,env(safe-area-inset-left,0px))}
+nav button{background:none;border:0;color:var(--apag);font:600 11px var(--fb);display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;cursor:pointer}
+nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2}
+nav button[aria-current="true"]{color:var(--acento)}
+.cartao{background:var(--sup);border:1px solid var(--linha);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px}
+h2{font:700 17px var(--fd);margin:0}
+h3{font:600 14px var(--fb);margin:0;color:var(--tinta2);text-transform:uppercase;letter-spacing:.05em}
+.muted{color:var(--apag);font-size:13px}
+.ordem{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;background:var(--sup2);border-left:5px solid var(--c)}
+.ordem .tk{font:700 16px var(--fd)}.ordem .nm{font-size:12px;color:var(--apag)}
+.ordem .dir{margin-left:auto;text-align:right;font:500 13px var(--fm)}
+.tag{font:700 11px var(--fb);letter-spacing:.06em;color:var(--c);text-transform:uppercase}
+.c-v{--c:var(--venda)}.c-c{--c:var(--compra)}.c-m{--c:var(--mantem)}
+.btn{font:600 15px var(--fb);background:var(--acento);color:var(--acento-t);border:0;border-radius:10px;padding:12px 16px;cursor:pointer;width:100%}
+.btn.sec{background:var(--sup2);color:var(--tinta)}
+.btn.v{background:var(--venda);color:#fff}.btn.c{background:var(--compra);color:#fff}
+.lin{display:flex;gap:8px}.lin>*{flex:1}
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.kpi{background:var(--sup2);border-radius:10px;padding:10px}.kpi .r{font-size:11px;color:var(--apag);text-transform:uppercase;letter-spacing:.05em}.kpi .v{font:600 19px var(--fm)}
+.pos{color:var(--compra)}.neg{color:var(--venda)}
+.lista{display:flex;flex-direction:column}
+.item{display:flex;align-items:center;gap:10px;padding:11px 2px;border-bottom:1px solid var(--linha);cursor:pointer}
+.item:last-child{border-bottom:0}.item .tk{font:700 15px var(--fd);min-width:64px}.item .nm{flex:1;font-size:13px;color:var(--tinta2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .pr{font:500 14px var(--fm);text-align:right}
+input,select{font:16px var(--fb);color:var(--tinta);background:var(--sup2);border:1px solid var(--linha);border-radius:10px;padding:11px 12px;width:100%}
+label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--apag)}
+.graf{height:240px;width:100%}
+.graf.p{height:120px}
+.seg{display:flex;background:var(--sup2);border-radius:9px;padding:3px;gap:3px}.seg button{flex:1;border:0;background:none;font:600 13px var(--fb);color:var(--tinta2);padding:6px;border-radius:7px}
+.seg button[aria-pressed="true"]{background:var(--sup);color:var(--tinta);box-shadow:0 1px 3px #0002}
+dialog{border:0;border-radius:16px;padding:0;width:min(440px,92vw);background:var(--sup);color:var(--tinta)}
+dialog::backdrop{background:#0008}
+dialog .cartao{border:0}
+.aviso{font-size:12px;color:var(--apag);text-align:center;padding:4px 10px}
+.legenda{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--tinta2)}.legenda i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 4px;border-bottom:1px solid var(--linha);text-align:right}td:first-child,th:first-child{text-align:left}
+th{color:var(--apag);font-weight:600;font-size:11px;text-transform:uppercase}
+.vazio{padding:20px;text-align:center;color:var(--apag)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header><h1>Radar B3</h1><span class="sub" id="sub">carregando…</span></header>
+<main id="tela"></main>
+<nav id="nav">
+  <button data-t="radar" aria-current="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l6-6"/></svg>Radar</button>
+  <button data-t="carteira"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M8 6V4h8v2M3 11h18"/></svg>Carteira</button>
+  <button data-t="mercado"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 7-9"/><path d="M15 6h4v4"/></svg>Mercado</button>
+  <button data-t="desempenho"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Desempenho</button>
+  <button data-t="ajustes"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Ajustes</button>
+</nav>
+<dialog id="dlg"><div class="cartao" id="dlg-c"></div></dialog>
+<script src="app.js"></script>
+</body>
+</html>

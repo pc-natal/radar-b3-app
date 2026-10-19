@@ -1,0 +1,15 @@
+{
+  "name": "Radar B3",
+  "short_name": "Radar B3",
+  "description": "Sinais diários do método dinâmico, carteira simulada e cotações da B3.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d1b1e",
+  "theme_color": "#0d1b1e",
+  "lang": "pt-BR",
+  "icons": [
+    {"src": "icone-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "icone-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
