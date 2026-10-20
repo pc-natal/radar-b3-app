@@ -299,11 +299,11 @@ async function labDinamico() {
 
 /* ---- comparar papéis ---- */
 function labComparar() {
-  $('#l-corpo').innerHTML = `<section class="cartao"><h3>Mesma estratégia em todos os papéis</h3>
+  $('#l-corpo').innerHTML = `<section class="cartao"><h3>Mesma estratégia em todos os papéis do estudo</h3>
     <p class="muted">Usa a estratégia montada na aba "Montar" (${LAB.membros.slice(0, LAB.n).map(m => m.est + ' + ' + m.stop).join(' &amp; ')}${LAB.n > 1 ? ', regra: ' + LAB.regra : ''}) no período escolhido.</p>
     <button class="btn" id="c-rodar">Rodar em todos os papéis</button><div id="c-res"></div></section>`;
   $('#c-rodar').onclick = async () => {
-    const el = $('#c-res'), linhas = [], lista = D.universo; el.innerHTML = '<div class="vazio"><b id="c-p">0</b>/' + lista.length + '</div>';
+    const el = $('#c-res'), linhas = [], lista = D.universo.filter(u => !u.extra); el.innerHTML = '<div class="vazio"><b id="c-p">0</b>/' + lista.length + '</div>';
     for (let i = 0; i < lista.length; i++) {
       const t = lista[i].papel; $('#c-p').textContent = i + 1;
       try {

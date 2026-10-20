@@ -16,8 +16,10 @@ jobs:
         with: { python-version: '3.12' }
       - run: pip install yfinance==1.7.0
       - run: python cotacoes.py
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
       - run: |
           git config user.name "radar-b3-bot"; git config user.email "radar-b3-bot@users.noreply.github.com"
-          git add data/cotacoes.json
+          git add data/cotacoes.json; git add data/alertas.json 2>/dev/null || true
           git commit -m "cotações $(date -u +%FT%H:%M)" || exit 0
           git pull --rebase -q && git push -q

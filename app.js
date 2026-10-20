@@ -72,9 +72,19 @@ function abre(t) { aba = t; document.querySelectorAll('#nav button').forEach(b =
 function telaRadar() {
   const R = D.radar, o = R.ordens, dt = R.detalhes;
   const card = (t, cls, rot, extra) => { const d = dt[t] || {}; return `<div class="ordem ${cls}"><div><div class="tag">${rot}</div><div class="tk">${t}</div><div class="nm">${d.nome || ''}</div></div>
-    <div class="dir">${brl(d.fechamento)}<br><span class="muted">stop ${brl(d.stop)}</span>${extra || ''}</div></div>`; };
+    <div class="dir">${brl(d.fechamento)}<br><span class="muted">stop ${brl(d.stop)}${d.consenso != null ? ' · consenso ' + Math.round(d.consenso * 100) + '%' : ''}</span>${extra || ''}</div></div>`; };
   const nada = !o.vender.length && !o.comprar.length;
-  $('#tela').innerHTML = `
+  const idade = Math.floor((Date.now() - new Date(R.ultimo_pregao + 'T12:00')) / 864e5);
+  const aviso = idade > 4 ? `<section class="cartao" style="border-color:var(--venda)"><b class="neg">Dados desatualizados</b><p class="muted">O último pregão calculado foi ${dataBR(R.ultimo_pregao)} (há ${idade} dias). A rotina diária pode ter falhado: confira antes de seguir as ordens.</p></section>` : '';
+  const consenso = R.consenso ? `<section class="cartao"><h2>Consenso do dia</h2>
+    <p class="muted">Fração das ${R.n_variantes} variantes do método que indicam compra de cada ação no próximo pregão. A carteira compra quando passa de ${Math.round(R.teta * 100)}%.</p>
+    ${Object.entries(R.consenso).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([t, f]) => `<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><b style="width:64px">${t}</b><div style="flex:1;background:var(--sup2);border-radius:5px;height:14px"><div style="width:${Math.round(f * 100)}%;height:100%;border-radius:5px;background:${f >= R.teta ? 'var(--compra)' : 'var(--apag)'}"></div></div><span style="width:44px;text-align:right" class="muted">${Math.round(f * 100)}%</span></div>`).join('')}</section>` : '';
+  const cuidados = `<section class="cartao"><h3>Leia antes de usar</h3><ul class="lista muted">
+    <li>Tudo aqui é simulação com dados históricos. Não é recomendação de investimento.</li>
+    <li>As ações do estudo são as grandes de hoje (viés de sobrevivência): o passado tende a parecer melhor do que seria na época.</li>
+    <li>O resultado é muito sensível a custos: com 0,15% por ordem em vez de 0,07%, o retorno histórico cai bastante.</li>
+    <li>Desde 2022 o método rendeu menos que o CDI e o IBOV. Acompanhe sem dinheiro por semanas antes de decidir.</li></ul></section>`;
+  $('#tela').innerHTML = `${aviso}
   <section class="cartao"><h2>Ordens para o próximo pregão</h2>
     <p class="muted">Calculadas com o fechamento de ${dataBR(R.ultimo_pregao)}. Executar na abertura.</p>
     ${o.vender.map(t => card(t, 'c-v', 'Vender')).join('')}
@@ -83,9 +93,11 @@ function telaRadar() {
     ${nada ? '<p class="muted">Nenhuma compra ou venda nova. Mantenha as posições.</p>' : ''}
     ${posicoes(cart()).lista.length === 0 && cart().ops.length === 0 ? '<button class="btn" id="copia">Começar a simulação copiando a carteira do método</button>' : (nada ? '' : '<button class="btn" id="executa">Executar na minha carteira simulada</button>')}
     <button class="btn sec" id="porque">Por que essas ações?</button>
+    <button class="btn sec" id="claude">Conversar com o Claude sobre estas ordens</button>
   </section>
+  ${consenso}
   <section class="cartao"><h2>Carteira do método</h2>
-    <p class="muted">Até ${R.vagas} ações ao mesmo tempo, as mais fortes entre as que têm sinal de compra. Caixa no CDI.</p>
+    <p class="muted">Até ${R.vagas} ações ao mesmo tempo, as de maior consenso entre as que passam do limiar (empate: a mais forte nos últimos 6 meses). Caixa no CDI.</p>
     <table><tr><th>Papel</th><th>Desde</th><th>Resultado</th><th>Stop</th></tr>
     ${R.posicoes_metodo.map(p => `<tr><td><b>${p.papel}</b></td><td>${dataBR(p.desde)}</td><td class="${p.resultado >= 0 ? 'pos' : 'neg'}">${pct(p.resultado)}</td><td>${brl(p.stop)}</td></tr>`).join('') || '<tr><td colspan="4" class="vazio">Sem posições: 100% no CDI.</td></tr>'}
     </table>
@@ -95,7 +107,8 @@ function telaRadar() {
     <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Método</span><span><i style="background:${css('--linha-i')}"></i>IBOV</span><span><i style="background:${css('--linha-c')}"></i>CDI</span></div>
     <div class="graf" id="g-curva"></div>
     <p class="muted">Simulação histórica (backtest). Resultado passado não garante resultado futuro.</p>
-  </section>`;
+  </section>
+  ${cuidados}`;
   const desenha = anos => {
     limpaGraficos(); const C = R.curva; let i0 = 0;
     if (anos < 99) { const lim = new Date(); lim.setFullYear(lim.getFullYear() - anos); i0 = C.datas.findIndex(d => new Date(d) >= lim); }
@@ -111,10 +124,11 @@ function telaRadar() {
   $('#porque').onclick = () => {
     const tks = [...o.vender, ...o.comprar, ...o.manter];
     $('#dlg-c').innerHTML = `<h2>Configurações que deram o sinal</h2>${tks.map(t => `<div><b>${t}</b><div class="muted">${(dt[t].membros || []).join('<br>')}</div></div>`).join('')}
-      <p class="muted">Toda semana o método escolhe, para cada ação, as 3 configurações (estudo + parâmetros + stop) de melhor desempenho nos últimos 5 anos e segue a maioria.</p><button class="btn" id="dlg-ok">Fechar</button>`;
+      <p class="muted">${R.metodo === 'consenso' ? 'O método tem ' + R.n_variantes + ' variantes (janelas de 1 a 5 anos, critérios e comitês diferentes). Cada uma escolhe, olhando só o passado, as melhores configurações de indicadores e stops. A carteira compra as ações em que pelo menos ' + Math.round(R.teta * 100) + '% das variantes indicam compra e vende quando o consenso cai abaixo disso. Usar o consenso, em vez de uma variante só, reduz o risco de ter escolhido a variante errada.' : 'Toda semana o método escolhe, para cada ação, as 3 configurações de melhor desempenho e segue a maioria.'}</p><button class="btn" id="dlg-ok">Fechar</button>`;
     $('#dlg-ok').onclick = () => $('#dlg').close(); $('#dlg').showModal();
   };
   if ($('#executa')) $('#executa').onclick = () => executaOrdens();
+  $('#claude').onclick = () => perguntaClaude(contextoRadar());
   if ($('#copia')) $('#copia').onclick = () => copiaMetodo();
 }
 function copiaMetodo() {
@@ -123,6 +137,17 @@ function copiaMetodo() {
   const fatia = posicoes(cart()).caixa / R.vagas;
   for (const t of alvo) { const px = preco(t); if (!px) continue; const q = Math.floor(fatia / px.preco); if (q > 0 && registra('C', t, q, px, 'cópia do método')) feitas.push(`Comprou ${q} ${t} a ${brl(px.preco)}`); }
   alerta(feitas.length ? 'Simulação iniciada:<br>' + feitas.join('<br>') + '<br><br>A partir de agora, siga as ordens diárias com o botão "Executar".' : 'Nada a copiar.');
+}
+function contextoRadar() {
+  const R = D.radar, o = R.ordens, d = R.detalhes, {caixa, lista} = posicoes(cart());
+  const f = t => `${t} (R$ ${d[t] && d[t].fechamento}${d[t] && d[t].consenso != null ? ', consenso ' + Math.round(d[t].consenso * 100) + '%' : ''}${d[t] && d[t].stop ? ', stop de proteção ' + d[t].stop : ''})`;
+  const L = l => l.length ? l.map(f).join('; ') : 'nada';
+  const minha = lista.length ? lista.map(p => `${p.papel} ${p.qtd} ações`).join('; ') + ` e R$ ${Math.round(caixa)} em caixa` : 'ainda vazia';
+  return `Sou investidor iniciante e uso o app Radar B3 (simulação educacional, sem dinheiro real). Dados do pregão de ${R.ultimo_pregao}. O método (consenso de ${R.n_variantes || 324} variantes de indicadores técnicos, até ${R.vagas} ações) indica para o próximo pregão: VENDER: ${L(o.vender)}. COMPRAR: ${L(o.comprar)}. MANTER: ${L(o.manter)}. Minha carteira simulada: ${minha}. Lembre que o método tem evidência limitada (viés de sobrevivência, sensível a custos, fraco desde 2022). Explique de forma simples e com cautela. Minha pergunta: `;
+}
+function perguntaClaude(texto) {
+  try { navigator.clipboard.writeText(texto).catch(() => {}); } catch (e) {}
+  window.open('https://claude.ai/new?q=' + encodeURIComponent(texto), '_blank');
 }
 function executaOrdens() {
   const R = D.radar, c = cart(); let feitas = [];
@@ -181,7 +206,7 @@ function telaMercado(filtro = '') {
   const lst = D.universo.filter(u => !f || u.papel.includes(f) || (u.nome || '').toUpperCase().includes(f));
   $('#tela').innerHTML = `<section class="cartao"><input id="busca" placeholder="Buscar ação (ex.: PETR4, Vale)" value="${filtro}">
     <div class="lista">${lst.map(u => { const px = preco(u.papel), v = variacao(u.papel); const sinal = D.radar.ordens.comprar.includes(u.papel) ? '🟢' : D.radar.ordens.vender.includes(u.papel) ? '🔴' : D.radar.ordens.manter.includes(u.papel) ? '🔵' : '';
-      return `<div class="item" data-tk="${u.papel}"><span class="tk">${nomeTk(u.papel)} ${sinal}</span><span class="nm">${u.nome}</span><span class="pr">${brl(px && px.preco)}<br><span class="${v >= 0 ? 'pos' : 'neg'}">${pct(v, 2)}</span></span></div>`; }).join('')}</div>
+      return `<div class="item" data-tk="${u.papel}"><span class="tk">${nomeTk(u.papel)} ${sinal}</span><span class="nm">${u.nome}${u.extra ? ' · fora do estudo' : ''}</span><span class="pr">${brl(px && px.preco)}<br><span class="${v >= 0 ? 'pos' : 'neg'}">${pct(v, 2)}</span></span></div>`; }).join('')}</div>
     <p class="muted">${D.cot ? 'Cotações de ' + horaBR(D.cot.atualizado) + ' (atraso ~15 min).' : 'Mostrando o último fechamento.'} 🟢 compra · 🔴 venda · 🔵 mantido pelo método.</p></section>`;
   const b = $('#busca'); b.oninput = () => { const pos = b.selectionStart; telaMercado(b.value); const n = $('#busca'); n.focus(); n.setSelectionRange(pos, pos); };
   document.querySelectorAll('.item[data-tk]').forEach(e => e.onclick = () => telaPapel(e.dataset.tk));
@@ -208,7 +233,8 @@ async function telaPapel(tk) {
     <div class="seg" id="per"><button data-m="3">3 meses</button><button data-m="12" aria-pressed="true">1 ano</button><button data-m="36">3 anos</button></div>
     <div class="legenda"><span><i style="background:${css('--compra')}"></i>HiLo de alta</span><span><i style="background:${css('--venda')}"></i>HiLo de baixa</span></div>
     <div class="graf" id="g-p"></div><h3>IFR (14)</h3><div class="graf p" id="g-i"></div>
-    ${tk !== '^BVSP' ? '<div class="lin"><button class="btn c" id="pc">Comprar</button><button class="btn v" id="pv">Vender</button></div>' : ''}</section>`;
+    ${tk !== '^BVSP' ? '<div class="lin"><button class="btn c" id="pc">Comprar</button><button class="btn v" id="pv">Vender</button></div>' : ''}
+    <button class="btn sec" id="pq">Perguntar ao Claude sobre ${nomeTk(tk)}</button></section>`;
   $('#volta').onclick = () => abre('mercado');
   const desenha = m => {
     limpaGraficos(); const i0 = Math.max(0, H.d.length - Math.round(m * 21));
@@ -222,6 +248,7 @@ async function telaPapel(tk) {
   desenha(12);
   document.querySelectorAll('#per button').forEach(b => b.onclick = () => { document.querySelectorAll('#per button').forEach(x => x.setAttribute('aria-pressed', x === b)); desenha(+b.dataset.m); });
   if ($('#pc')) { $('#pc').onclick = () => dlgOrdem('C', tk); $('#pv').onclick = () => dlgOrdem('V', tk); }
+  $('#pq').onclick = () => perguntaClaude(`Sou investidor iniciante (simulação educacional). Quero entender ${nomeTk(tk)} (${H.nome}): preço R$ ${px && px.preco}, variação do dia ${pct(variacao(tk), 2)}${dt && dt.consenso != null ? ', consenso do método ' + Math.round(dt.consenso * 100) + '%' : ''}${st ? ', situação no método: ' + st[1] : ''}. Explique o momento do papel e os riscos, de forma simples. Minha pergunta: `);
 }
 
 /* ---------------- DESEMPENHO ---------------- */
