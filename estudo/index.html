@@ -1,0 +1,572 @@
+<title>Radar Dinâmico B3</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<style>
+/* Layout: mesa de operações — barra de abas fixa no topo, controles numa linha acima de cada gráfico,
+   leitura do resumo para o detalhe. Paleta: neutros frios de papel de boleto + petróleo como acento. */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --surface-2:#eef1f4; --ink:#121820; --ink-2:#465061; --muted:#7f8897;
+  --line:#dde2e8; --accent:#0d6b6b; --accent-ink:#ffffff; --accent-soft:#d9eeec;
+  --s-estrat:#2a78d6; --s-bh:#eb6834; --s-cdi:#8a8f98; --s-extra:#1baf7a;
+  --good:#0a7d0a; --bad:#c23434; --warn:#b77800;
+  --heat-neg:#c23434; --heat-mid:#eef1f4; --heat-pos:#1f63b8;
+  --f-display:"Archivo","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1116; --surface:#151a21; --surface-2:#1c222b; --ink:#e8ecf1; --ink-2:#b3bcc8; --muted:#7c8696;
+  --line:#28303b; --accent:#3fb3ae; --accent-ink:#06201f; --accent-soft:#163533;
+  --s-estrat:#3987e5; --s-bh:#d95926; --s-cdi:#9aa0a8; --s-extra:#199e70;
+  --good:#2fbf4a; --bad:#e66767; --warn:#e3a21a;
+  --heat-neg:#d24d4d; --heat-mid:#1c222b; --heat-pos:#3d8be8; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1116; --surface:#151a21; --surface-2:#1c222b; --ink:#e8ecf1; --ink-2:#b3bcc8; --muted:#7c8696;
+  --line:#28303b; --accent:#3fb3ae; --accent-ink:#06201f; --accent-soft:#163533;
+  --s-estrat:#3987e5; --s-bh:#d95926; --s-cdi:#9aa0a8; --s-extra:#199e70;
+  --good:#2fbf4a; --bad:#e66767; --warn:#e3a21a;
+  --heat-neg:#d24d4d; --heat-mid:#1c222b; --heat-pos:#3d8be8; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;margin:0}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+.wrap{max-width:1240px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.marca{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding-block:14px 6px}
+.marca h1{font-family:var(--f-display);font-weight:800;font-size:22px;letter-spacing:-.01em;margin:0}
+.marca .sub{color:var(--muted);font-size:13px}
+nav.abas{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding-block:4px 0}
+nav.abas button{font:600 14px var(--f-body);color:var(--ink-2);background:none;border:0;border-bottom:3px solid transparent;padding:8px 12px;cursor:pointer;white-space:nowrap}
+nav.abas button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+nav.abas button:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+main{padding-block:22px 60px}
+section.aba{display:flex;flex-direction:column;gap:22px}
+h2{font-family:var(--f-display);font-weight:700;font-size:20px;margin:0;text-wrap:balance}
+h3{font-family:var(--f-display);font-weight:700;font-size:16px;margin:0}
+p{margin:0;max-width:72ch}
+.muted{color:var(--muted)} .ink2{color:var(--ink-2)}
+.painel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.grade2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:22px}
+.grade3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}
+.controles{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:end}
+.controles label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+select,input[type=range]{font:14px var(--f-body);color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:7px 10px;min-width:0;max-width:100%}
+input[type=range]{padding:0;accent-color:var(--accent);width:100%}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{font:500 13px var(--f-body);background:var(--surface-2);color:var(--ink-2);border:0;padding:7px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.btn{font:600 13px var(--f-body);background:var(--accent);color:var(--accent-ink);border:0;border-radius:7px;padding:8px 14px;cursor:pointer}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.tile{background:var(--surface-2);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.tile .rot{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.tile .val{font:600 22px var(--f-mono)}
+.tile .cmp{font-size:12.5px;color:var(--ink-2)}
+.pos{color:var(--good)} .neg{color:var(--bad)}
+.tabela{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-weight:600;color:var(--ink-2);background:var(--surface-2);position:sticky;top:0;cursor:pointer;user-select:none}
+td{font-family:var(--f-mono);font-size:13px}
+td.txt{font-family:var(--f-body);white-space:normal;min-width:180px}
+tr.destaque td{background:var(--accent-soft)}
+.chip{display:inline-flex;align-items:center;gap:6px;font:600 12px var(--f-body);padding:3px 9px;border-radius:999px;border:1px solid currentColor}
+.chip.compra{color:var(--good)} .chip.venda{color:var(--bad)} .chip.fora{color:var(--muted)} .chip.mantem{color:var(--accent)}
+.grafico{width:100%;min-height:340px}
+.veredito{border-left:4px solid var(--accent);padding:4px 0 4px 14px;display:flex;flex-direction:column;gap:8px}
+.lista{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;max-width:80ch}
+.nota{font-size:13px;color:var(--muted)}
+.legenda{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--ink-2)}
+.legenda i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.carregando{color:var(--muted);font-size:14px;padding:30px 0;text-align:center}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="marca"><h1>Radar Dinâmico B3</h1><span class="sub" id="sub">carregando dados…</span></div>
+    <nav class="abas" role="tablist" id="abas">
+      <button role="tab" data-aba="resumo" aria-selected="true">Resumo</button>
+      <button role="tab" data-aba="carteira">Carteira</button>
+      <button role="tab" data-aba="ranking">Ranking no tempo</button>
+      <button role="tab" data-aba="papel">Papel a papel</button>
+      <button role="tab" data-aba="sinais">Sinais de amanhã</button>
+      <button role="tab" data-aba="variantes">Todas as variantes</button>
+      <button role="tab" data-aba="metodo">Como funciona</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+<!-- ================= RESUMO ================= -->
+<section class="aba" id="aba-resumo">
+  <div class="painel">
+    <div class="veredito" id="veredito"></div>
+  </div>
+  <div class="painel">
+    <h2>Carteira recomendada: R$ 5.000 aplicados em janeiro de 2006</h2>
+    <p class="ink2" id="rec-desc"></p>
+    <div class="tiles" id="rec-tiles"></div>
+    <div class="legenda" id="rec-leg"></div>
+    <div id="g-rec" class="grafico" role="img" aria-label="Evolução de R$ 5.000 na carteira recomendada, no IBOV e no CDI"></div>
+    <p class="nota">Escala logarítmica. Linha tracejada: início da validação (01/2015). A escolha da variante usou só 2006–2014; o trecho depois da linha é teste fora da amostra.</p>
+  </div>
+  <div class="painel">
+    <h2>Será que foi sorte? As 972 carteiras possíveis</h2>
+    <p class="ink2">Cada barra conta quantas das 972 combinações (configurações × janela × critério × comitê × filtro × vagas) tiveram aquele retorno ao ano em 2015–2026. Se só a recomendada fosse boa, seria sorte. Se a maioria fica à direita do IBOV, o método tem algo de real.</p>
+    <div id="g-hist" class="grafico" style="min-height:300px" role="img" aria-label="Histograma do retorno anual das 972 carteiras na validação"></div>
+    <div class="tiles" id="hist-tiles"></div>
+  </div>
+  <div class="painel">
+    <h2>Explore qualquer combinação</h2>
+    <div class="controles">
+      <label>Configurações<select id="c-uni"></select></label>
+      <label>Janela<select id="c-jan"></select></label>
+      <label>Critério<select id="c-crit"></select></label>
+      <label>Comitê<select id="c-com"></select></label>
+      <label>Filtro<select id="c-fil"></select></label>
+      <label>Vagas<select id="c-vag"></select></label>
+      <label>Período<span class="seg" id="c-per"></span></label>
+    </div>
+    <div class="tiles" id="c-tiles"></div>
+    <div class="legenda" id="c-leg"></div>
+    <div id="g-cart" class="grafico" role="img" aria-label="Evolução de R$ 5.000 na combinação escolhida"></div>
+  </div>
+  <div class="painel">
+    <h3>Ranking das 972 carteiras</h3>
+    <div class="controles"><label>Período<span class="seg" id="t-per"></span></label></div>
+    <div class="tabela" id="t-cart" style="max-height:520px"></div>
+  </div>
+</section>
+
+<!-- ================= CARTEIRA ================= -->
+<section class="aba" id="aba-carteira" hidden>
+  <div class="painel">
+    <h2>O que fazer no próximo pregão</h2>
+    <p class="ink2" id="o-intro"></p>
+    <div class="grade3" id="o-ordens"></div>
+  </div>
+  <div class="painel">
+    <h3>Posições atuais (simulação com R$ 5.000 desde 2006)</h3>
+    <div class="tabela" id="o-pos"></div>
+    <p class="nota">Stop do método: nível usado pelas configurações escolhidas (quando têm stop). Stop de proteção: ATR Chandelier (22 × 3), uma referência para sempre ter uma saída definida.</p>
+  </div>
+  <div class="painel">
+    <h3>Próximos da fila (sinal de compra, aguardando vaga)</h3>
+    <div class="tabela" id="o-cand"></div>
+  </div>
+  <div class="painel">
+    <h3>Como foram as operações</h3>
+    <div class="tiles" id="o-est"></div>
+    <div class="controles"><label>Papel<select id="o-papel"></select></label><label>Ano<select id="o-ano"></select></label></div>
+    <div class="tabela" id="o-ops" style="max-height:480px"></div>
+  </div>
+</section>
+
+<!-- ================= RANKING NO TEMPO ================= -->
+<section class="aba" id="aba-ranking" hidden>
+  <div class="painel">
+    <h2>Ranking Estudo × Stop, deslizando no tempo</h2>
+    <p class="ink2">A tabela do seu estudo de 2021–22, refeita para cada mês: em cada célula, o melhor rendimento que aquela combinação teria dado nos últimos N anos, entre todos os parâmetros testados. Arraste a data para ver o ranking mudar.</p>
+    <div class="controles">
+      <label>Papel<select id="k-papel"></select></label>
+      <label>Olhando para trás<span class="seg" id="k-jan"></span></label>
+      <label style="flex:1 1 260px">Data: <b id="k-data-txt" style="color:var(--ink);text-transform:none;letter-spacing:0"></b><input type="range" id="k-data" min="0" max="1" value="1"></label>
+      <button class="btn" id="k-play" type="button">▶ Animar</button>
+    </div>
+    <div class="tiles" id="k-tiles"></div>
+    <div id="g-heat" class="grafico" style="min-height:560px" role="img" aria-label="Mapa de calor do rendimento por estudo e stop"></div>
+  </div>
+  <div class="painel">
+    <h3>Top 10 configurações nesta data</h3>
+    <div class="tabela" id="k-top"></div>
+  </div>
+</section>
+
+<!-- ================= PAPEL A PAPEL ================= -->
+<section class="aba" id="aba-papel" hidden>
+  <div class="painel">
+    <h2>O método dinâmico num papel</h2>
+    <div class="controles">
+      <label>Papel<select id="p-papel"></select></label>
+      <label>Configurações<select id="p-uni"></select></label>
+      <label>Janela<select id="p-jan"></select></label>
+      <label>Critério<select id="p-crit"></select></label>
+      <label>Comitê<select id="p-com"></select></label>
+      <label>Filtro<select id="p-fil"></select></label>
+      <label>Período<span class="seg" id="p-per"></span></label>
+    </div>
+    <div class="tiles" id="p-tiles"></div>
+    <div class="legenda" id="p-leg"></div>
+    <div id="g-papel" class="grafico" role="img" aria-label="Curva de capital do método dinâmico no papel"></div>
+  </div>
+  <div class="grade2">
+    <div class="painel">
+      <h3>Situação atual</h3>
+      <div id="p-atual"></div>
+    </div>
+    <div class="painel">
+      <h3>O que o método escolhia (mudanças mês a mês)</h3>
+      <div class="tabela" id="p-esc" style="max-height:360px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SINAIS ================= -->
+<section class="aba" id="aba-sinais" hidden>
+  <div class="painel">
+    <h2>Sinais para o próximo pregão</h2>
+    <p class="ink2" id="s-intro"></p>
+    <div class="controles">
+      <label>Variante<select id="s-var"></select></label>
+    </div>
+    <div class="tabela" id="s-tab"></div>
+    <p class="nota">Sinal calculado com o fechamento do último pregão. Ordens: compra ou venda na abertura do próximo pregão; stop como ordem de venda stop no nível indicado. Simulação educacional, não é recomendação de investimento.</p>
+  </div>
+</section>
+
+<!-- ================= VARIANTES ================= -->
+<section class="aba" id="aba-variantes" hidden>
+  <div class="painel">
+    <h2>As 324 variantes do método, em 38 papéis</h2>
+    <p class="ink2">Mediana entre os papéis. "Ganha do C&amp;S" é a fração de papéis em que a variante superou o comprar e segurar no período.</p>
+    <div class="controles"><label>Período<span class="seg" id="v-per"></span></label></div>
+    <div class="tabela" id="v-tab" style="max-height:640px"></div>
+  </div>
+</section>
+
+<!-- ================= MÉTODO ================= -->
+<section class="aba" id="aba-metodo" hidden>
+  <div class="grade2">
+    <div class="painel">
+      <h2>Como o método dinâmico funciona</h2>
+      <ol class="lista">
+        <li><b>Toda semana</b>, para cada papel, olhamos uma janela para trás (1 a 5 anos, ou todo o histórico).</li>
+        <li>Nessa janela, testamos cerca de <b>7 mil configurações</b>: 22 estudos (IFR Wilder e Cutler, IFR2, IFR+MMS, cruzamentos de MMS e MME, MACD, estocásticos, Super Contagem, Super Sinal, Acumulação Estatística, rompimentos, Bollinger, HiLo) com vários parâmetros, cada um com 13 stops (sem stop, HiLo, ATR, % da mínima, PSAR).</li>
+        <li>Escolhemos a melhor (Top-1), ou as 2 melhores exigindo que concordem (Top-2 unânime), ou as 3 melhores por maioria (Top-3).</li>
+        <li>Aplicamos a escolha a partir do pregão seguinte. Na semana seguinte, tudo é recalculado.</li>
+        <li>Só se usa o que já tinha acontecido até o dia: o resultado é fora da amostra por construção.</li>
+      </ol>
+    </div>
+    <div class="painel">
+      <h2>Regras de execução e custos</h2>
+      <ul class="lista">
+        <li>Sinal avaliado no fechamento; compra e venda na <b>abertura do pregão seguinte</b> (ordem deixada na véspera).</li>
+        <li>Stop como ordem stop: dispara se a <b>mínima do dia</b> tocar o nível; gap de baixa sai na abertura.</li>
+        <li>Custo de 0,07% por ordem (emolumentos B3 + escorregamento). Corretagem zero.</li>
+        <li>Dinheiro fora do mercado rende CDI.</li>
+        <li>Preços ajustados por dividendos e desdobramentos (Yahoo Finance), com limpeza de dados ruins.</li>
+        <li>IR: vendas de ações até R$ 20 mil por mês são isentas no swing trade. Com R$ 5.000 a carteira fica dentro da isenção.</li>
+      </ul>
+    </div>
+    <div class="painel">
+      <h2>Desenvolvimento × validação</h2>
+      <p>As escolhas sobre o método (janela, critério, comitê, filtro) devem ser feitas olhando <b>só 2006–2014</b>. O período <b>2015–2026</b> serve para medir o que se teria ganho de verdade. Escolher a variante olhando a validação repetiria o sobreajuste do estudo antigo.</p>
+    </div>
+    <div class="painel">
+      <h2>Limitações conhecidas</h2>
+      <ul class="lista">
+        <li><b>Viés de sobrevivência:</b> as 37 ações são as grandes de hoje. Em 2006 ninguém saberia quais seriam. Isso favorece o comprar e segurar e as carteiras.</li>
+        <li>Dados gratuitos do Yahoo têm falhas nos anos antigos. Corrigimos as maiores, mas pequenas imperfeições permanecem.</li>
+        <li>Resultado passado não garante resultado futuro.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const pct = (x, d = 1) => x == null || isNaN(x) ? '–' : (x * 100).toFixed(d).replace('.', ',') + '%';
+const num = (x, d = 2) => x == null || isNaN(x) ? '–' : x.toFixed(d).replace('.', ',');
+const brl = x => 'R$ ' + Math.round(x).toLocaleString('pt-BR');
+const PERS = [['validacao', '2015–2026 (validação)'], ['desenvolvimento', '2006–2014 (desenvolvimento)'], ['completo', 'Completo']];
+const MI = {cagr: 0, max_dd: 1, sharpe: 2, vol: 3, retorno_total: 4, tempo_posicionado: 5, op_por_ano: 6};
+let R = null; const cache = {papel: {}, ranking: {}};
+const estado = {aba: 'resumo', tPer: 'validacao', rPer: 'completo', pPer: 'validacao', vPer: 'validacao', kJan: '1250', play: null};
+const guarda = (k, v) => { try { localStorage.setItem('radar.' + k, v) } catch (e) {} };
+const le = k => { try { return localStorage.getItem('radar.' + k) } catch (e) { return null } };
+
+async function dados(caminho) { const r = await fetch('dados/' + caminho); if (!r.ok) throw new Error(caminho); return r.json(); }
+
+function seg(el, opcoes, atual, aoMudar) {
+  el.innerHTML = '';
+  for (const [v, t] of opcoes) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = t; b.setAttribute('aria-pressed', v === atual);
+    b.onclick = () => { $$('#' + el.id + ' button').forEach(x => x.setAttribute('aria-pressed', 'false')); b.setAttribute('aria-pressed', 'true'); aoMudar(v); };
+    el.appendChild(b);
+  }
+}
+function opcoes(sel, lista, atual) { sel.innerHTML = lista.map(([v, t]) => `<option value="${v}" ${v === atual ? 'selected' : ''}>${t}</option>`).join(''); }
+
+function layoutBase(extra = {}) {
+  return Object.assign({
+    paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', margin: {l: 84, r: 16, t: 10, b: 40}, separators: ',.',
+    font: {family: 'IBM Plex Sans, Segoe UI, sans-serif', color: css('--ink-2'), size: 12},
+    xaxis: {gridcolor: css('--line'), linecolor: css('--line'), zeroline: false},
+    yaxis: {gridcolor: css('--line'), linecolor: css('--line'), zeroline: false},
+    hovermode: 'x unified', hoverlabel: {bgcolor: css('--surface'), bordercolor: css('--line'), font: {color: css('--ink')}},
+    showlegend: false
+  }, extra);
+}
+const CFG = {displayModeBar: false, responsive: true, locale: 'pt-BR'};
+
+function tabela(el, cols, linhas, opt = {}) {
+  let ord = opt.ordem ?? null, desc = true;
+  const desenha = () => {
+    let ls = linhas.slice();
+    if (ord != null) ls.sort((a, b) => { const x = a.v[ord], y = b.v[ord]; return (desc ? -1 : 1) * ((x ?? -1e9) - (y ?? -1e9) || String(x).localeCompare(String(y))); });
+    el.innerHTML = `<table><thead><tr>${cols.map((c, i) => `<th data-i="${i}" scope="col">${c[0]}${ord === i ? (desc ? ' ▾' : ' ▴') : ''}</th>`).join('')}</tr></thead><tbody>${
+      ls.map(l => `<tr class="${l.cls || ''}">${cols.map((c, i) => `<td class="${c[2] || ''}">${c[1] ? c[1](l.v[i], l) : l.v[i]}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    el.querySelectorAll('th').forEach(th => th.onclick = () => { const i = +th.dataset.i; if (ord === i) desc = !desc; else { ord = i; desc = true; } desenha(); });
+  };
+  desenha();
+}
+const fmtPct = v => `<span class="${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}">${pct(v)}</span>`;
+
+/* ---------------- RESUMO ---------------- */
+const PI = {completo: 0, desenvolvimento: 1, validacao: 2};
+const janTxt = j => j == 0 ? 'expansiva' : (j / 250) + (j > 250 ? ' anos' : ' ano');
+let CUR = null, CR = null;
+const tileH = (rot, v, cmp, cls) => `<div class="tile"><span class="rot">${rot}</span><span class="val ${cls || ''}">${v}</span><span class="cmp">${cmp}</span></div>`;
+function linhaRec() { return R.carteiras.find(l => l[0] === R.carteira_recomendada); }
+function desenhaRec() {
+  const m = CR.metricas, mc = m.carteira, mi = m.IBOV, md = m.CDI;
+  $('#rec-desc').innerHTML = `<b>${CR.nome.replaceAll(' | ', ' · ')}</b> · ${CR.vagas} vagas. Toda semana, cada uma das 37 ações escolhe, olhando os últimos ${CR.nome.split(' | ')[1]}, as 3 configurações (estudo + parâmetros + stop) de melhor Sharpe; compra quando 2 das 3 concordam. A carteira ocupa até ${CR.vagas} ações ao mesmo tempo, priorizando as mais fortes dos últimos 6 meses; o caixa rende CDI.`;
+  $('#rec-tiles').innerHTML =
+    tileH('R$ 5.000 em 2006 viraram', brl(CR.patrimonio_hoje), `IBOV: ${brl(CR.curva_ibov.at(-1))} · CDI: ${brl(CR.curva_cdi.at(-1))}`, 'pos') +
+    tileH('Retorno ao ano 2015–2026 (validação)', pct(mc.validacao.cagr), `IBOV ${pct(mi.validacao.cagr)} · CDI ${pct(md.validacao.cagr)}`, mc.validacao.cagr > mi.validacao.cagr ? 'pos' : '') +
+    tileH('Retorno ao ano 2006–2014 (escolha)', pct(mc.desenvolvimento.cagr), `IBOV ${pct(mi.desenvolvimento.cagr)} · CDI ${pct(md.desenvolvimento.cagr)}`) +
+    tileH('Pior queda (2006–2026)', pct(mc.completo.max_dd), `IBOV ${pct(mi.completo.max_dd)}`, 'neg');
+  const tr = [
+    {x: CR.semanas, y: CR.curva, name: 'Carteira', line: {color: css('--s-estrat'), width: 2.2}},
+    {x: CR.semanas, y: CR.curva_ibov, name: 'IBOV', line: {color: css('--s-bh'), width: 1.8}},
+    {x: CR.semanas, y: CR.curva_cdi, name: 'CDI', line: {color: css('--s-cdi'), width: 1.6, dash: 'dot'}}].map(t => Object.assign(t, {type: 'scatter', mode: 'lines', hovertemplate: 'R$ %{y:,.0f}'}));
+  $('#rec-leg').innerHTML = [[css('--s-estrat'), 'Carteira recomendada'], [css('--s-bh'), 'IBOV'], [css('--s-cdi'), 'CDI']].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('');
+  Plotly.react('g-rec', tr, layoutBase({yaxis: {type: 'log', gridcolor: css('--line'), tickprefix: 'R$ ', tickformat: ',.0f'},
+    shapes: [{type: 'line', x0: '2015-01-01', x1: '2015-01-01', yref: 'paper', y0: 0, y1: 1, line: {color: css('--muted'), dash: 'dash', width: 1}}]}), CFG);
+}
+function desenhaHist() {
+  const v = R.carteiras.map(l => l[9][0]).filter(x => x != null).map(x => x * 100);
+  const ref = n => R.carteiras_refs[n][2][0] * 100, rec = linhaRec()[9][0] * 100;
+  const marcas = [['IBOV', ref('IBOV (comprar e segurar)'), css('--s-bh')], ['CDI', ref('CDI'), css('--s-cdi')], ['37 ações, pesos iguais', ref('Todas as ações, pesos iguais'), css('--s-extra')], ['Recomendada', rec, css('--ink')]];
+  Plotly.react('g-hist', [{type: 'histogram', x: v, xbins: {size: 1}, marker: {color: css('--s-estrat'), line: {color: css('--surface'), width: 1}}, hovertemplate: '%{x}% ao ano: %{y} carteiras<extra></extra>'}],
+    layoutBase({hovermode: 'closest', bargap: 0.05, xaxis: {title: {text: 'retorno ao ano, 2015–2026 (%)'}, gridcolor: css('--line'), ticksuffix: '%'}, yaxis: {title: {text: 'nº de carteiras'}, gridcolor: css('--line')},
+      shapes: marcas.map(([n, x, c]) => ({type: 'line', x0: x, x1: x, yref: 'paper', y0: 0, y1: 1, line: {color: c, width: 2, dash: n === 'Recomendada' ? 'solid' : 'dash'}})),
+      annotations: marcas.map(([n, x, c], k) => ({x, yref: 'paper', y: 1 - k * 0.09, text: n, showarrow: false, xanchor: 'left', xshift: 4, font: {color: css('--ink-2'), size: 11}}))}), CFG);
+  const f = lim => v.filter(x => x > lim).length / v.length;
+  const ord = v.slice().sort((a, b) => a - b);
+  $('#hist-tiles').innerHTML = tileH('Ganharam do IBOV', pct(f(ref('IBOV (comprar e segurar)')), 0), 'das 972 carteiras') + tileH('Ganharam do CDI', pct(f(ref('CDI')), 0), 'das 972 carteiras') +
+    tileH('Ganharam das 37 ações em pesos iguais', pct(f(ref('Todas as ações, pesos iguais')), 0), 'referência inflada pelo viés de sobrevivência') +
+    tileH('Retorno mediano', ord[Math.floor(ord.length / 2)].toFixed(1).replace('.', ',') + '%', 'ao ano, 2015–2026');
+}
+async function desenhaExplora() {
+  if (!CUR) { CUR = await dados('carteiras_curvas.json'); }
+  const sel = [$('#c-uni').value, +$('#c-jan').value, $('#c-crit').value, $('#c-com').value, $('#c-fil').value, +$('#c-vag').value];
+  const L = R.carteiras.find(l => l[1] === sel[0] && l[2] === sel[1] && l[3] === sel[2] && l[4] === sel[3] && l[5] === sel[4] && l[6] === sel[5]);
+  if (!L) return;
+  const per = estado.rPer, m = L[7 + PI[per]], ib = R.carteiras_refs['IBOV (comprar e segurar)'][PI[per]], cd = R.carteiras_refs['CDI'][PI[per]];
+  $('#c-tiles').innerHTML = tileH('Retorno ao ano', pct(m[0]), `IBOV ${pct(ib[0])} · CDI ${pct(cd[0])}`, m[0] > ib[0] ? 'pos' : '') + tileH('Pior queda', pct(m[1]), `IBOV ${pct(ib[1])}`, 'neg') +
+    tileH('Sharpe', num(m[2]), `IBOV ${num(ib[2])}`) + tileH('R$ 5.000 viraram', brl(5000 * (1 + m[3])), `IBOV ${brl(5000 * (1 + ib[3]))}`);
+  const M = CUR.meses; let i0 = 0, i1 = M.length - 1;
+  if (per === 'validacao') i0 = M.findIndex(d => d >= '2014-12-31');
+  if (per === 'desenvolvimento') i1 = M.findIndex(d => d >= '2014-12-31');
+  const s = (y, nome, cor, dash) => { y = y.slice(i0, i1 + 1); const b = y.find(q => q != null) || 1; return {x: M.slice(i0, i1 + 1), y: y.map(q => q == null ? null : 5000 * q / b), type: 'scatter', mode: 'lines', name: nome, line: {color: cor, width: 2, dash: dash || 'solid'}, hovertemplate: 'R$ %{y:,.0f}'}; };
+  Plotly.react('g-cart', [s(CUR.carteiras[L[0]], 'Combinação', css('--s-estrat')), s(CUR.refs['IBOV (comprar e segurar)'], 'IBOV', css('--s-bh')), s(CUR.refs['CDI'], 'CDI', css('--s-cdi'), 'dot'), s(CUR.refs['Todas as ações, pesos iguais'], '37 ações', css('--s-extra'), 'dash')],
+    layoutBase({yaxis: {type: 'log', gridcolor: css('--line'), tickprefix: 'R$ ', tickformat: ',.0f'}}), CFG);
+  $('#c-leg').innerHTML = [[css('--s-estrat'), 'Combinação escolhida'], [css('--s-bh'), 'IBOV'], [css('--s-cdi'), 'CDI'], [css('--s-extra'), '37 ações, pesos iguais']].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('');
+}
+function desenhaTabelaCart() {
+  const k = PI[estado.tPer];
+  const ls = R.carteiras.map(l => ({v: [`${l[1]} · ${janTxt(l[2])} · ${l[3]} · ${l[4]} · ${l[5]}`, l[6], l[7 + k][0], l[7 + k][1], l[7 + k][2], 5000 * (1 + (l[7 + k][3] ?? 0))], cls: l[0] === R.carteira_recomendada ? 'destaque' : ''}));
+  tabela($('#t-cart'), [['Combinação', null, 'txt'], ['Vagas', v => v], ['Retorno ao ano', fmtPct], ['Pior queda', fmtPct], ['Sharpe', v => num(v)], ['R$ 5.000 →', v => brl(v)]], ls, {ordem: 2});
+}
+function desenhaResumo() { desenhaRec(); desenhaHist(); desenhaExplora(); desenhaTabelaCart(); }
+function iniciaResumo() {
+  const rec = linhaRec(), uniq = i => [...new Set(R.carteiras.map(l => l[i]))];
+  opcoes($('#c-uni'), uniq(1).map(x => [x, x]), rec[1]); opcoes($('#c-jan'), uniq(2).map(x => [x, janTxt(x)]), rec[2]);
+  opcoes($('#c-crit'), uniq(3).map(x => [x, x]), rec[3]); opcoes($('#c-com'), uniq(4).map(x => [x, x]), rec[4]);
+  opcoes($('#c-fil'), uniq(5).map(x => [x, x]), rec[5]); opcoes($('#c-vag'), uniq(6).map(x => [x, x + ' vagas']), rec[6]);
+  ['#c-uni', '#c-jan', '#c-crit', '#c-com', '#c-fil', '#c-vag'].forEach(s => $(s).onchange = desenhaExplora);
+  seg($('#c-per'), PERS, estado.rPer, v => { estado.rPer = v; desenhaExplora(); });
+  seg($('#t-per'), PERS, estado.tPer, v => { estado.tPer = v; desenhaTabelaCart(); });
+  $('#veredito').innerHTML = R.veredito_html || '';
+}
+
+/* ---------------- CARTEIRA ---------------- */
+function desenhaCarteira() {
+  const o = CR.ordens, S = CR.sinais;
+  $('#o-intro').textContent = `Com base no fechamento de ${new Date(CR.ultimo_pregao + 'T12:00').toLocaleDateString('pt-BR')}. Ordens para a abertura do próximo pregão. Simulação educacional, não é recomendação de investimento.`;
+  const card = (titulo, cls, lista, vazio) => `<div class="painel" style="padding:14px"><h3><span class="chip ${cls}">${titulo}</span></h3>${lista.length ? '<ul class="lista">' + lista.map(t => `<li><b>${t}</b> · fech. ${num(S[t] && S[t].fechamento)}${S[t] && S[t].stop_protecao ? ` · stop de proteção ${num(S[t].stop_protecao)}` : ''}</li>`).join('') + '</ul>' : `<p class="muted">${vazio}</p>`}</div>`;
+  $('#o-ordens').innerHTML = card('VENDER', 'venda', o.vender, 'Nenhuma venda.') + card('COMPRAR', 'compra', o.comprar, 'Nenhuma compra (sem vaga livre ou sem sinal).') + card('MANTER', 'mantem', o.manter, 'Nenhuma posição.');
+  tabela($('#o-pos'), [['Papel', null], ['Desde', v => v ? new Date(v + 'T12:00').toLocaleDateString('pt-BR') : '–'], ['Entrada', v => num(v)], ['Fechamento', v => num(v)], ['Resultado', fmtPct], ['Stop do método', v => v == null ? '–' : num(v)], ['Stop de proteção', v => v == null ? '–' : num(v)], ['Valor na simulação', v => brl(v)], ['Ação', v => `<span class="chip ${v.startsWith('VENDER') ? 'venda' : 'mantem'}">${v}</span>`]],
+    CR.posicoes.map(p => ({v: [p.papel, p.desde, p.preco_entrada, p.fechamento, p.retorno, p.stop, p.stop_protecao, p.valor, p.acao]})));
+  tabela($('#o-cand'), [['Papel', null], ['Força 6 meses', fmtPct], ['Fechamento', v => num(v)], ['Stop de proteção', v => v == null ? '–' : num(v)], ['Configurações que deram o sinal', null, 'txt']],
+    o.candidatos.map(c => ({v: [c.papel, c.forca6m, c.fechamento, c.stop_protecao, c.membros.join(' · ')]})), {ordem: 1});
+  const e = CR.estatisticas;
+  $('#o-est').innerHTML = tileH('Operações fechadas', e.n.toLocaleString('pt-BR'), `${(e.n / 20.8).toFixed(0)} por ano, ~${(e.n / 20.8 / 52).toFixed(1).replace('.', ',')} por semana`) +
+    tileH('Acerto', pct(e.acerto, 0), `ganho médio ${pct(e.ganho_medio)} · perda média ${pct(e.perda_media)}`) +
+    tileH('Resultado médio por operação', pct(e.media, 2), `duração média ${e.duracao_media.toFixed(0)} dias`, e.media > 0 ? 'pos' : 'neg');
+  desenhaOps();
+}
+function desenhaOps() {
+  const pp = $('#o-papel').value, an = $('#o-ano').value;
+  const ls = CR.operacoes.filter(x => (pp === '*' || x.papel === pp) && (an === '*' || x.entrada.startsWith(an))).slice().reverse().slice(0, 400)
+    .map(x => ({v: [x.papel, x.entrada, x.saida, x.preco_entrada, x.preco_saida, x.retorno, x.dias, x.motivo]}));
+  const d = v => v ? new Date(v + 'T12:00').toLocaleDateString('pt-BR') : 'aberta';
+  tabela($('#o-ops'), [['Papel', null], ['Entrada', d], ['Saída', d], ['Preço entrada', v => num(v)], ['Preço saída', v => num(v)], ['Resultado', fmtPct], ['Dias', v => v], ['Saída por', v => v]], ls);
+}
+function iniciaCarteira() {
+  const ps = [...new Set(CR.operacoes.map(x => x.papel))].sort(), anos = [...new Set(CR.operacoes.map(x => x.entrada.slice(0, 4)))].sort().reverse();
+  opcoes($('#o-papel'), [['*', 'Todos']].concat(ps.map(x => [x, x])), '*'); opcoes($('#o-ano'), [['*', 'Todos']].concat(anos.map(x => [x, x])), anos[0]);
+  $('#o-papel').onchange = desenhaOps; $('#o-ano').onchange = desenhaOps;
+}
+
+/* ---------------- RANKING NO TEMPO ---------------- */
+async function desenhaRanking() {
+  const tk = $('#k-papel').value;
+  if (!cache.ranking[tk]) { $('#g-heat').innerHTML = '<div class="carregando">carregando…</div>'; cache.ranking[tk] = await dados('ranking/' + tk + '.json'); $('#g-heat').innerHTML = ''; }
+  const K = cache.ranking[tk], J = K.janelas[estado.kJan];
+  const sl = $('#k-data'); sl.max = J.datas.length - 1; if (+sl.value > +sl.max) sl.value = sl.max;
+  const i = +sl.value; $('#k-data-txt').textContent = new Date(J.datas[i] + 'T12:00').toLocaleDateString('pt-BR', {month: 'long', year: 'numeric'});
+  const ns = K.stops.length, ne = K.estudos.length;
+  const z = K.estudos.map((e, a) => K.stops.map((s, b) => J.rend[i][a * ns + b]));
+  const txt = z.map(r => r.map(v => v == null ? '' : (v > 0 ? '+' : '') + Math.round(v) + '%'));
+  const cfg = K.estudos.map((e, a) => K.stops.map((s, b) => { const id = J.config[i][a * ns + b]; return id >= 0 ? R.configs[id] : ''; }));
+  const flat = z.flat().filter(v => v != null); const lim = Math.max(20, Math.min(400, Math.max(...flat.map(Math.abs))));
+  let best = -1e9, bi = 0, bj = 0; z.forEach((r, a) => r.forEach((v, b) => { if (v != null && v > best) { best = v; bi = a; bj = b; } }));
+  Plotly.react('g-heat', [{type: 'heatmap', z, x: K.stops, y: K.estudos, text: txt, texttemplate: '%{text}', customdata: cfg,
+    hovertemplate: '%{y} + %{x}<br>%{z:.1f}% em ' + (estado.kJan / 250) + ' anos<br>%{customdata}<extra></extra>',
+    zmin: -lim, zmax: lim, colorscale: [[0, css('--heat-neg')], [0.5, css('--heat-mid')], [1, css('--heat-pos')]], xgap: 2, ygap: 2,
+    colorbar: {ticksuffix: '%', outlinewidth: 0, thickness: 10, tickfont: {color: css('--ink-2')}}, textfont: {size: 11}}],
+    layoutBase({margin: {l: 170, r: 10, t: 10, b: 40}, hovermode: 'closest', yaxis: {autorange: 'reversed', gridcolor: 'rgba(0,0,0,0)'}, xaxis: {side: 'top', gridcolor: 'rgba(0,0,0,0)'},
+      shapes: [{type: 'rect', x0: bj - .5, x1: bj + .5, y0: bi - .5, y1: bi + .5, line: {color: css('--ink'), width: 2}}]}), CFG);
+  const bh = J.comprar_segurar[i];
+  const tile = (rot, v, cmp, cls) => `<div class="tile"><span class="rot">${rot}</span><span class="val ${cls || ''}">${v}</span><span class="cmp">${cmp}</span></div>`;
+  $('#k-tiles').innerHTML = tile('Melhor combinação', (best > 0 ? '+' : '') + best.toFixed(0) + '%', `${K.estudos[bi]} + ${K.stops[bj]}`, 'pos') +
+    tile('Comprar e segurar no mesmo período', (bh > 0 ? '+' : '') + (bh ?? 0).toFixed(0) + '%', `${tk}, últimos ${estado.kJan / 250} anos`, bh >= 0 ? '' : 'neg');
+  const todas = []; z.forEach((r, a) => r.forEach((v, b) => { if (v != null) todas.push({v: [cfg[a][b], v, K.estudos[a], K.stops[b]]}); }));
+  todas.sort((a, b) => b.v[1] - a.v[1]);
+  tabela($('#k-top'), [['Configuração (melhores parâmetros da célula)', null, 'txt'], ['Rendimento', v => (v > 0 ? '+' : '') + v.toFixed(1).replace('.', ',') + '%'], ['Estudo', null, 'txt'], ['Stop', null, 'txt']], todas.slice(0, 10), {ordem: 1});
+}
+function iniciaRanking() {
+  opcoes($('#k-papel'), R.papeis.filter(p => p !== 'BOVA11').map(p => [p, p === 'BVSP' ? 'IBOV' : p]), 'BVSP');
+  $('#k-papel').onchange = desenhaRanking;
+  seg($('#k-jan'), [['750', '3 anos'], ['1000', '4 anos'], ['1250', '5 anos']], estado.kJan, v => { estado.kJan = v; desenhaRanking(); });
+  $('#k-data').value = 100000; $('#k-data').oninput = desenhaRanking;
+  $('#k-play').onclick = () => {
+    if (estado.play) { clearInterval(estado.play); estado.play = null; $('#k-play').textContent = '▶ Animar'; return; }
+    const sl = $('#k-data'); if (+sl.value >= +sl.max) sl.value = 0;
+    $('#k-play').textContent = '■ Parar';
+    estado.play = setInterval(() => { if (+sl.value >= +sl.max) { $('#k-play').click(); return; } sl.value = +sl.value + 1; desenhaRanking(); }, 350);
+  };
+}
+
+/* ---------------- PAPEL A PAPEL ---------------- */
+function partes(v) { return v.split(' | '); }
+async function desenhaPapel() {
+  const tk = $('#p-papel').value;
+  if (!cache.papel[tk]) { cache.papel[tk] = await dados('papel/' + tk + '.json'); montaSeletoresPapel(cache.papel[tk]); }
+  const P = cache.papel[tk];
+  const v = [$('#p-uni').value, $('#p-jan').value, $('#p-crit').value, $('#p-com').value, $('#p-fil').value].join(' | ');
+  if (!P.metricas[v]) return;
+  const per = estado.pPer, m = P.metricas[v][per] || [], bh = (P.metricas['Comprar e segurar'][per] || []), cd = (P.metricas['CDI'][per] || []);
+  const tile = (rot, val, cmp, cls) => `<div class="tile"><span class="rot">${rot}</span><span class="val ${cls || ''}">${val}</span><span class="cmp">${cmp}</span></div>`;
+  $('#p-tiles').innerHTML = m.length ?
+    tile('Retorno ao ano', pct(m[MI.cagr]), `Comprar e segurar ${pct(bh[MI.cagr])} · CDI ${pct(cd[MI.cagr])}`, m[MI.cagr] > bh[MI.cagr] ? 'pos' : '') +
+    tile('Pior queda', pct(m[MI.max_dd]), `Comprar e segurar ${pct(bh[MI.max_dd])}`, 'neg') +
+    tile('Tempo comprado', pct(m[MI.tempo_posicionado], 0), `${num(m[MI.op_por_ano], 1)} operações por ano`) +
+    tile('Sharpe', num(m[MI.sharpe]), `Comprar e segurar ${num(bh[MI.sharpe])}`)
+    : '<p class="muted">Sem dados neste período para este papel.</p>';
+  let i0 = 0, i1 = P.meses.length - 1;
+  if (per === 'validacao') i0 = Math.max(0, P.meses.findIndex(d => d >= '2014-12'));
+  if (per === 'desenvolvimento') { const k = P.meses.findIndex(d => d >= '2015-01'); i1 = k > 0 ? k : i1; }
+  const s = (nome, cor, dash) => { const y = P.curvas[nome].slice(i0, i1 + 1); const b = y.find(q => q != null) || 1;
+    return {x: P.meses.slice(i0, i1 + 1), y: y.map(q => q == null ? null : 5000 * q / b), type: 'scatter', mode: 'lines', name: nome, line: {color: cor, width: 2, dash: dash || 'solid'}, hovertemplate: '%{y:,.0f}'}; };
+  Plotly.react('g-papel', [s(v, css('--s-estrat')), s('Comprar e segurar', css('--s-bh')), s('CDI', css('--s-cdi'), 'dot')],
+    layoutBase({yaxis: {type: 'log', gridcolor: css('--line'), tickprefix: 'R$ ', tickformat: ',.0f'}}), CFG);
+  $('#p-leg').innerHTML = [[css('--s-estrat'), 'Método dinâmico (variante escolhida)'], [css('--s-bh'), 'Comprar e segurar ' + (tk === 'BVSP' ? 'IBOV' : tk)], [css('--s-cdi'), 'CDI']]
+    .map(([cor, t]) => `<span><i style="background:${cor}"></i>${t}</span>`).join('');
+  // situação atual
+  const a = P.atual.atuais[v];
+  if (a) {
+    const ch = a.posicionado_hoje ? (a.posicionado_amanha ? ['mantem', 'MANTER COMPRADO'] : ['venda', 'VENDER na abertura']) : (a.posicionado_amanha ? ['compra', 'COMPRAR na abertura'] : ['fora', 'FICAR FORA']);
+    $('#p-atual').innerHTML = `<p>Último pregão: <b>${new Date(P.atual.ultimo_pregao + 'T12:00').toLocaleDateString('pt-BR')}</b> · fechamento ${num(P.atual.fechamento)}</p>
+      <p style="margin-block:10px"><span class="chip ${ch[0]}">${ch[1]}</span></p>
+      <p class="ink2">Configurações escolhidas hoje:</p><ul class="lista">${a.membros.map((x, i) => `<li>${x}${a.stops[i] ? ` · stop ${num(a.stops[i])}` : ''}</li>`).join('')}</ul>
+      <p class="nota">Preço acima da MME200: ${P.atual.acima_mme200 ? 'sim' : 'não'}.</p>`;
+  }
+  // escolhas mês a mês (só mudanças)
+  const E = P.escolhas[v] || []; const lin = []; let ant = null;
+  E.forEach((id, k) => { if (id !== ant && id >= 0) { lin.push({v: [P.escolhas_meses[k], R.configs[id]]}); } ant = id; });
+  lin.reverse();
+  tabela($('#p-esc'), [['Desde', null], ['Configuração líder (Top-1)', null, 'txt']], lin);
+}
+function montaSeletoresPapel(P) {
+  const vs = P.variantes.filter(x => x.includes(' | ')).map(partes);
+  const un = [...new Set(vs.map(x => x[0]))], ja = [...new Set(vs.map(x => x[1]))], cr = [...new Set(vs.map(x => x[2]))], co = [...new Set(vs.map(x => x[3]))], fi = [...new Set(vs.map(x => x[4]))];
+  const rec = (R.variante_recomendada || '').split(' | ');
+  const keep = (sel, l, d) => opcoes(sel, l.map(x => [x, x]), sel.value && l.includes(sel.value) ? sel.value : (l.includes(d) ? d : l[0]));
+  keep($('#p-uni'), un, rec[0]); keep($('#p-jan'), ja, rec[1]); keep($('#p-crit'), cr, rec[2]); keep($('#p-com'), co, rec[3]); keep($('#p-fil'), fi, rec[4]);
+}
+function iniciaPapel() {
+  opcoes($('#p-papel'), R.papeis.map(p => [p, p === 'BVSP' ? 'IBOV' : p]), 'BVSP');
+  ['#p-papel', '#p-uni', '#p-jan', '#p-crit', '#p-com', '#p-fil'].forEach(s => $(s).onchange = desenhaPapel);
+  seg($('#p-per'), PERS, estado.pPer, v => { estado.pPer = v; desenhaPapel(); });
+}
+
+/* ---------------- SINAIS ---------------- */
+function desenhaSinais() {
+  const v = $('#s-var').value; const linhas = [];
+  for (const tk of R.papeis) {
+    const S = R.sinais[tk]; const a = S && S.atuais[v]; if (!a) continue;
+    const st = a.posicionado_hoje ? (a.posicionado_amanha ? 1 : 3) : (a.posicionado_amanha ? 0 : 2);
+    const stops = a.stops.filter(x => x != null);
+    linhas.push({v: [tk === 'BVSP' ? 'IBOV' : tk, st, S.fechamento, stops.length ? Math.max(...stops) : null, a.membros.join(' · ')], cls: st === 0 ? 'destaque' : ''});
+  }
+  const rot = ['<span class="chip compra">COMPRAR</span>', '<span class="chip mantem">MANTER</span>', '<span class="chip fora">FORA</span>', '<span class="chip venda">VENDER</span>'];
+  tabela($('#s-tab'), [['Papel', null], ['Próximo pregão', x => rot[x]], ['Fechamento', x => num(x)], ['Stop', x => x == null ? '–' : num(x)], ['Configurações escolhidas', null, 'txt']], linhas, {ordem: 1});
+}
+function iniciaSinais() {
+  const P = R.sinais[R.papeis[0]]; const vs = Object.keys(P.atuais);
+  const rec = R.variante_recomendada && vs.includes(R.variante_recomendada) ? R.variante_recomendada : vs[0];
+  opcoes($('#s-var'), vs.map(x => [x, x]), rec);
+  $('#s-var').onchange = desenhaSinais;
+  $('#s-intro').textContent = `Último pregão: ${new Date(P.ultimo_pregao + 'T12:00').toLocaleDateString('pt-BR')}. A variante pré-selecionada é a escolhida pelo desempenho no período de desenvolvimento (2006–2014).`;
+  desenhaSinais();
+}
+
+/* ---------------- VARIANTES ---------------- */
+function desenhaVariantes() {
+  const A = R.agregado[estado.vPer];
+  const linhas = Object.entries(A).map(([k, x]) => ({v: [k, x[1], x[2], x[3], x[4], x[5], x[6], x[0]], cls: k === R.variante_recomendada ? 'destaque' : ''}));
+  tabela($('#v-tab'), [['Variante', null, 'txt'], ['Retorno ao ano', fmtPct], ['Pior queda', fmtPct], ['Sharpe', v => num(v)], ['Ganha do C&S', v => pct(v, 0)], ['Ganha do CDI', v => pct(v, 0)], ['Tempo comprado', v => pct(v, 0)], ['Papéis', v => v]], linhas, {ordem: 1});
+}
+
+/* ---------------- abas e tema ---------------- */
+const desenhar = {resumo: desenhaResumo, carteira: desenhaCarteira, ranking: desenhaRanking, papel: desenhaPapel, sinais: desenhaSinais, variantes: desenhaVariantes};
+function abre(aba) {
+  estado.aba = aba; guarda('aba', aba);
+  $$('#abas button').forEach(b => b.setAttribute('aria-selected', b.dataset.aba === aba));
+  $$('section.aba').forEach(s => s.hidden = s.id !== 'aba-' + aba);
+  if (desenhar[aba]) desenhar[aba]();
+}
+$$('#abas button').forEach(b => b.onclick = () => abre(b.dataset.aba));
+const redesenha = () => { if (R && desenhar[estado.aba]) desenhar[estado.aba](); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redesenha);
+new MutationObserver(redesenha).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+
+(async () => {
+  try {
+    [R, CR] = await Promise.all([dados('resumo.json'), dados('carteira_recomendada.json')]);
+    $('#sub').textContent = `${R.papeis.length - 1} ações + IBOV · simulação diária 2006–${R.gerado_em.slice(0, 4)} · atualizado em ${new Date(R.gerado_em + 'T12:00').toLocaleDateString('pt-BR')}`;
+    iniciaResumo(); iniciaCarteira(); iniciaRanking(); iniciaPapel(); iniciaSinais();
+    seg($('#v-per'), PERS, estado.vPer, v => { estado.vPer = v; desenhaVariantes(); });
+    const h = location.hash.slice(1), salva = le('aba');
+    abre(desenhar[h] || h === 'metodo' ? h : (salva && (desenhar[salva] || salva === 'metodo') ? salva : 'resumo'));
+  } catch (e) { $('#sub').textContent = 'Não foi possível carregar os dados (' + e.message + ').'; }
+})();
+</script>
