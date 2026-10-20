@@ -283,7 +283,11 @@ function telaMais() {
     <div class="item" data-t="ajustes"><span class="tk" style="min-width:130px">Ajustes</span><span class="nm" style="white-space:normal">Notificações, capital, backup da carteira</span></div></div></section>`;
   document.querySelectorAll('.item[data-t]').forEach(e => e.onclick = () => abre(e.dataset.t));
 }
-function telaEstudo() {
+async function telaEstudo() {
+  let existe = false; try { existe = (await fetch('estudo/index.html', {method: 'HEAD'})).ok; } catch (e) {}
+  if (!existe) { $('#tela').innerHTML = `<section class="cartao"><button class="btn sec" id="volta">← Mais</button><h2>Estudo completo</h2>
+    <p>O dashboard do estudo (972 carteiras, ranking no tempo, método dinâmico papel a papel) está sendo recalculado depois de uma correção no motor e volta aqui em breve.</p>
+    <p class="muted">Enquanto isso, o <b>Lab</b> já faz, no próprio celular, ranking de estratégias, combinações de indicadores e comparação entre papéis.</p></section>`; $('#volta').onclick = () => abre('mais'); return; }
   $('#tela').innerHTML = `<section class="cartao" style="padding:8px"><button class="btn sec" id="volta">← Mais</button>
     <iframe src="estudo/index.html" title="Estudo completo" style="width:100%;height:calc(100vh - 230px);min-height:420px;border:0;border-radius:8px"></iframe></section>`;
   $('#volta').onclick = () => abre('mais');
