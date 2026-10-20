@@ -1,6 +1,6 @@
 // Radar B3: funciona offline com a última versão baixada; dados sempre tentam a rede primeiro.
-const CACHE = 'radarb3-v3';
-const BASE = ['./', 'index.html', 'app.js', 'motor.js', 'lab.js', 'lab-worker.js', 'manifest.webmanifest', 'icone-192.png'];
+const CACHE = 'radarb3-v4';
+const BASE = ['./', 'index.html', 'app.js', 'motor.js', 'lab.js', 'lab-worker.js', 'dinamico.js', 'manifest.webmanifest', 'icone-192.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(BASE))); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {

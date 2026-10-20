@@ -70,7 +70,7 @@ function selecao(din, ctx, par) {
   const {grade, Gd, S1, S2, NE, K} = din, {janela, criterio, top, diverso} = par, valido = par.valido;
   let j0 = 0; while (grade[j0] < T0 - 1) j0++;
   const nRe = Gd - j0, out = new Int32Array(nRe * top), p = Math.floor(janela / PASSO);
-  const ests = ctx.estId, sc = new Float32Array(K), idx = diverso ? new Int32Array(K) : null;
+  const ests = ctx.estId, sc = new Float32Array(K);
   const SQ = fr(Math.sqrt(252));
   for (let jj = 0; jj < nRe; jj++) {
     const j = j0 + jj, ji = janela > 0 ? j - p : 0, dias = grade[j] - grade[ji];
@@ -101,9 +101,13 @@ function selecao(din, ctx, par) {
       }
       for (let q = 0; q < top; q++) out[jj * top + q] = bi[q];
     } else {
-      for (let k = 0; k < K; k++) idx[k] = k;
-      const cand = Math.min(200, K - 1), ord = Array.from(idx).sort((x, y) => sc[y] - sc[x] || x - y).slice(0, cand), vistos = new Set(); let q = 0;
-      for (const k of ord) { const e = ests[k]; if (vistos.has(e)) continue; vistos.add(e); out[jj * top + q++] = k; if (q === top) break; }
+      // candidatos: as `cand` maiores notas (empate: menor índice), depois os `top` primeiros de estudos diferentes
+      const cand = Math.min(200, K - 1), ordenada = sc.slice().sort(), thr = ordenada[K - cand], pick = [];
+      for (let k = 0; k < K; k++) if (sc[k] > thr) pick.push(k);
+      for (let k = 0; k < K && pick.length < cand; k++) if (sc[k] === thr) pick.push(k);
+      pick.sort((x, y) => sc[y] - sc[x] || x - y);
+      const vistos = new Set(); let q = 0;
+      for (const k of pick) { const e = ests[k]; if (vistos.has(e)) continue; vistos.add(e); out[jj * top + q++] = k; if (q === top) break; }
       while (q < top) { out[jj * top + q] = out[jj * top + q - 1]; q++; }
     }
   }
@@ -158,6 +162,7 @@ function situacaoAtual(ctx, sel, nRe, top, voto, hold, perm) {
 function executa(ctx, par) {
   const din = ctx.din; if (!din.habilita) throw new Error('histórico curto demais para o método dinâmico');
   par.valido = par.valido || universo(par.universo);
+  if (!ctx.estId) { const {ESTUDOS, STOPS} = Mo.GR, NS = STOPS.length; ctx.estId = []; for (let k = 0; k < din.K; k++) ctx.estId.push(ESTUDOS[(k / NS) | 0][1]); }
   const {sel, nRe, j0} = selecao(din, ctx, par);
   const r = compoe(ctx, sel, nRe, j0, par.top, par.voto, par.filtro200);
   r.atual = situacaoAtual(ctx, sel, nRe, par.top, par.voto, r.hold, r.perm);

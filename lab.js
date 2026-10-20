@@ -97,7 +97,7 @@ async function telaLab() {
     <label>Fim<input id="l-fim" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.fim}"></label></div>
     <div class="lin"><label>Capital (R$)<input id="l-cap" type="number" inputmode="decimal" value="${LAB.capital}"></label>
     <label>Dinheiro parado<select id="l-cdi"><option value="1" ${LAB.cdi ? 'selected' : ''}>rende CDI</option><option value="0" ${!LAB.cdi ? 'selected' : ''}>sem rendimento</option></select></label></div>
-    <div class="seg" id="l-sub"><button data-s="ranking" aria-pressed="${LAB.sub === 'ranking'}">Ranking</button><button data-s="montar" aria-pressed="${LAB.sub === 'montar'}">Montar</button><button data-s="comparar" aria-pressed="${LAB.sub === 'comparar'}">Comparar</button></div>
+    <div class="seg" id="l-sub"><button data-s="ranking" aria-pressed="${LAB.sub === 'ranking'}">Ranking</button><button data-s="montar" aria-pressed="${LAB.sub === 'montar'}">Montar</button><button data-s="dinamico" aria-pressed="${LAB.sub === 'dinamico'}">Dinâmico</button><button data-s="comparar" aria-pressed="${LAB.sub === 'comparar'}">Comparar</button></div>
   </section><div id="l-corpo"></div>`;
   $('#l-tk').onchange = e => { LAB.tk = e.target.value; LAB.rank = null; telaLab(); };
   $('#l-ini').onchange = e => { LAB.ini = e.target.value; subLab(); };
@@ -107,7 +107,7 @@ async function telaLab() {
   document.querySelectorAll('#l-sub button').forEach(b => b.onclick = () => { LAB.sub = b.dataset.s; document.querySelectorAll('#l-sub button').forEach(x => x.setAttribute('aria-pressed', x === b)); subLab(); });
   subLab();
 }
-function subLab() { limpaGraficos(); ({ranking: labRanking, montar: labMontar, comparar: labComparar})[LAB.sub](); }
+function subLab() { limpaGraficos(); ({ranking: labRanking, montar: labMontar, dinamico: labDinamico, comparar: labComparar})[LAB.sub](); }
 
 /* ---- ranking ---- */
 function garanteWorker() { if (!LAB.worker) LAB.worker = new Worker('lab-worker.js'); return LAB.worker; }
@@ -118,8 +118,9 @@ function indexa(D_) {
     w.onmessage = e => {
       const m = e.data;
       if (m.tipo === 'prog') { const el = $('#l-prog'); if (el) el.textContent = Math.round(m.f * 100) + '%'; }
-      if (m.tipo === 'indexado') { LAB.indexadoDe = LAB.tk + D_.d.length; LAB.mesInfo = {mes: m.mes, idxFim: m.idxFim}; res(LAB.mesInfo); }
+      if (m.tipo === 'indexado') { LAB.indexadoDe = LAB.tk + D_.d.length; LAB.mesInfo = {mes: m.mes, idxFim: m.idxFim, dinOk: m.dinOk, t0: m.t0}; res(LAB.mesInfo); }
     };
+    w.onerror = () => { LAB.worker = null; LAB.indexadoDe = null; res({erro: true}); };
     w.postMessage({tipo: 'indexar', tk: LAB.tk, d: D_.d, o: Array.from(D_.o), h: Array.from(D_.h), l: Array.from(D_.l), c: Array.from(D_.c), cdiM: LAB.cdiM});
   });
 }
@@ -129,6 +130,7 @@ async function labRanking() {
   const D_ = await labCarrega(LAB.tk), corpo = $('#l-corpo');
   corpo.innerHTML = `<section class="cartao"><div class="vazio">Simulando as ${Motor.GR.ESTUDOS.length * NS} estratégias deste papel…<br><b id="l-prog">0%</b><br><span class="muted">(só na primeira vez de cada papel; leva de 15 a 60 s no celular)</span></div></section>`;
   const info = await indexa(D_); if (LAB.sub !== 'ranking') return;
+  if (info.erro) { corpo.innerHTML = '<section class="cartao"><div class="vazio">Faltou memória no aparelho para simular as 6.968 estratégias deste papel. Feche outros aplicativos e tente de novo.</div></section>'; return; }
   let m0 = busca_(info.mes, LAB.ini.slice(0, 7), 'l'), m1 = busca_(info.mes, LAB.fim.slice(0, 7), 'r') - 1;
   m0 = Math.min(m0, info.mes.length - 1); m1 = Math.max(m1, m0);
   const R = await pedeRanking(m0, m1); LAB.rank = R;
@@ -208,38 +210,91 @@ function simulaMontada(D_) {
   const el = $('#m-res'); if (!el) return;
   try {
     const membros = LAB.membros.slice(0, LAB.n), r = combina(D_, membros, LAB.n > 1 ? LAB.regra : 'sozinha', LAB.cdi);
-    const [a, b] = fatia(D_.d, LAB.ini, LAB.fim); if (b - a < 20) { el.innerHTML = '<section class="cartao"><div class="vazio">Escolha um período de pelo menos um mês.</div></section>'; return; }
-    const cap = LAB.capital, base = r.eq[a - 1];
-    const eq = Array.from(r.eq.subarray(a - 1, b), v => v / base * cap);
-    const datas = D_.d.slice(a - 1, b), cdiSl = D_.cdi.slice(a - 1, b);
-    const bh = Array.from(D_.c.subarray(a - 1, b), v => v / D_.c[a - 1] * cap);
-    let acc = cap; const cd = [cap]; for (let t = a; t < b; t++) { acc *= 1 + D_.cdi[t]; cd.push(acc); }
-    const m = Motor.resumo(eq, datas, cdiSl, Array.from(r.hold.subarray(a, b)), Array.from(r.ent.subarray(a, b)));
-    const mb = Motor.resumo(bh, datas);
-    const ops = operacoesDe(D_.d, r.eq, r.hold, r.ent, a, b), gan = ops.filter(o => o.r > 0), per = ops.filter(o => o.r <= 0);
-    const media = x => x.length ? x.reduce((s, o) => s + o.r, 0) / x.length : null;
-    const kpi = (rot, v, c, cls) => `<div class="kpi"><div class="r">${rot}</div><div class="v ${cls || ''}">${v}</div><div class="muted">${c}</div></div>`;
-    el.innerHTML = `
-    <section class="cartao"><h3>Resultado</h3><div class="kpis">
-      ${kpi('R$ ' + cap.toLocaleString('pt-BR') + ' viraram', brl(eq.at(-1)), 'comprar e segurar: ' + brl(bh.at(-1)), eq.at(-1) > bh.at(-1) ? 'pos' : '')}
-      ${kpi('Ao ano', pctP(m.cagr), 'C&S ' + pctP(mb.cagr), m.cagr > mb.cagr ? 'pos' : '')}
-      ${kpi('Pior queda', pctP(m.max_dd), 'C&S ' + pctP(mb.max_dd), 'neg')}
-      ${kpi('Operações', String(m.operacoes), m.op_por_ano.toFixed(1).replace('.', ',') + ' por ano')}
-      ${kpi('Tempo comprado', pctP(m.tempo_posicionado, 0), 'do período')}
-      ${kpi('Acerto', ops.length ? pctP(gan.length / ops.length, 0) : '–', 'ganho médio ' + pctP(media(gan)) + ' · perda média ' + pctP(media(per)))}</div>
-      <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Estratégia</span><span><i style="background:${css('--linha-i')}"></i>Comprar e segurar</span><span><i style="background:${css('--linha-c')}"></i>CDI</span></div>
-      <div class="graf" id="m-graf"></div>
-      ${LAB.n > 1 ? '<p class="muted">Na combinação, o stop de cada estratégia vale para a entrada; o dia-a-dia segue a maioria (ou a unanimidade) das posições.</p>' : ''}</section>
-    <section class="cartao"><h3>Operações</h3><div class="rolagem" style="max-height:420px"><table><tr><th>Entrada</th><th>Saída</th><th>Dias</th><th>Resultado</th></tr>
-      ${ops.slice().reverse().map(o => `<tr><td>${dataBR(o.e)}</td><td>${o.x ? dataBR(o.x) : 'aberta'}</td><td>${o.dias}</td><td class="${corv(o.r)}">${pctP(o.r)}</td></tr>`).join('')}</table></div></section>`;
-    limpaGraficos();
-    const g = grafico($('#m-graf'), 260, true);
-    const s1 = g.addLineSeries({color: css('--linha-m'), lineWidth: 3, priceLineVisible: false, lastValueVisible: false}); s1.setData(datas.map((t, i) => ({time: t, value: eq[i]})));
-    g.addLineSeries({color: css('--linha-i'), lineWidth: 2, priceLineVisible: false, lastValueVisible: false}).setData(datas.map((t, i) => ({time: t, value: bh[i]})));
-    g.addLineSeries({color: css('--linha-c'), lineWidth: 2, priceLineVisible: false, lastValueVisible: false}).setData(datas.map((t, i) => ({time: t, value: cd[i]})));
-    if (ops.length <= 150) { const mk = []; ops.forEach(o => { mk.push({time: o.e, position: 'belowBar', color: css('--compra'), shape: 'arrowUp'}); if (o.x) mk.push({time: o.x, position: 'aboveBar', color: css('--venda'), shape: 'arrowDown'}); }); mk.sort((x, y) => x.time < y.time ? -1 : 1); s1.setMarkers(mk); }
-    g.timeScale().fitContent();
+    const [a, b] = fatia(D_.d, LAB.ini, LAB.fim);
+    renderRes(el, D_, r, a, b, LAB.n > 1 ? 'Na combinação, o stop de cada estratégia vale para a entrada; o dia-a-dia segue a maioria (ou a unanimidade) das posições.' : '');
   } catch (e) { el.innerHTML = `<section class="cartao"><div class="vazio">Não foi possível simular: ${e.message}</div></section>`; }
+}
+/* painel de resultado (KPIs, gráfico e operações) usado por "Montar" e "Dinâmico" */
+function renderRes(el, D_, r, a, b, nota) {
+  if (b - a < 20) { el.innerHTML = '<section class="cartao"><div class="vazio">Escolha um período de pelo menos um mês.</div></section>'; return; }
+  const cap = LAB.capital, base = r.eq[a - 1];
+  const eq = Array.from(r.eq.subarray(a - 1, b), v => v / base * cap);
+  const datas = D_.d.slice(a - 1, b), cdiSl = D_.cdi.slice(a - 1, b);
+  const bh = Array.from(D_.c.subarray(a - 1, b), v => v / D_.c[a - 1] * cap);
+  let acc = cap; const cd = [cap]; for (let t = a; t < b; t++) { acc *= 1 + D_.cdi[t]; cd.push(acc); }
+  const m = Motor.resumo(eq, datas, cdiSl, Array.from(r.hold.subarray(a, b)), Array.from(r.ent.subarray(a, b)));
+  const mb = Motor.resumo(bh, datas);
+  const ops = operacoesDe(D_.d, r.eq, r.hold, r.ent, a, b), gan = ops.filter(o => o.r > 0), per = ops.filter(o => o.r <= 0);
+  const media = x => x.length ? x.reduce((s, o) => s + o.r, 0) / x.length : null;
+  const kpi = (rot, v, c, cls) => `<div class="kpi"><div class="r">${rot}</div><div class="v ${cls || ''}">${v}</div><div class="muted">${c}</div></div>`;
+  el.innerHTML = `
+  <section class="cartao"><h3>Resultado (${dataBR(datas[0])} a ${dataBR(datas.at(-1))})</h3><div class="kpis">
+    ${kpi('R$ ' + cap.toLocaleString('pt-BR') + ' viraram', brl(eq.at(-1)), 'comprar e segurar: ' + brl(bh.at(-1)), eq.at(-1) > bh.at(-1) ? 'pos' : '')}
+    ${kpi('Ao ano', pctP(m.cagr), 'C&S ' + pctP(mb.cagr), m.cagr > mb.cagr ? 'pos' : '')}
+    ${kpi('Pior queda', pctP(m.max_dd), 'C&S ' + pctP(mb.max_dd), 'neg')}
+    ${kpi('Operações', String(m.operacoes), m.op_por_ano.toFixed(1).replace('.', ',') + ' por ano')}
+    ${kpi('Tempo comprado', pctP(m.tempo_posicionado, 0), 'do período')}
+    ${kpi('Acerto', ops.length ? pctP(gan.length / ops.length, 0) : '–', 'ganho médio ' + pctP(media(gan)) + ' · perda média ' + pctP(media(per)))}</div>
+    <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Estratégia</span><span><i style="background:${css('--linha-i')}"></i>Comprar e segurar</span><span><i style="background:${css('--linha-c')}"></i>CDI</span></div>
+    <div class="graf" id="m-graf"></div>${nota ? `<p class="muted">${nota}</p>` : ''}</section>
+  <section class="cartao"><h3>Operações</h3><div class="rolagem" style="max-height:420px"><table><tr><th>Entrada</th><th>Saída</th><th>Dias</th><th>Resultado</th></tr>
+    ${ops.slice().reverse().map(o => `<tr><td>${dataBR(o.e)}</td><td>${o.x ? dataBR(o.x) : 'aberta'}</td><td>${o.dias}</td><td class="${corv(o.r)}">${pctP(o.r)}</td></tr>`).join('')}</table></div></section>`;
+  limpaGraficos();
+  const g = grafico($('#m-graf'), 260, true);
+  const s1 = g.addLineSeries({color: css('--linha-m'), lineWidth: 3, priceLineVisible: false, lastValueVisible: false}); s1.setData(datas.map((t, i) => ({time: t, value: eq[i]})));
+  g.addLineSeries({color: css('--linha-i'), lineWidth: 2, priceLineVisible: false, lastValueVisible: false}).setData(datas.map((t, i) => ({time: t, value: bh[i]})));
+  g.addLineSeries({color: css('--linha-c'), lineWidth: 2, priceLineVisible: false, lastValueVisible: false}).setData(datas.map((t, i) => ({time: t, value: cd[i]})));
+  if (ops.length <= 150) { const mk = []; ops.forEach(o => { mk.push({time: o.e, position: 'belowBar', color: css('--compra'), shape: 'arrowUp'}); if (o.x) mk.push({time: o.x, position: 'aboveBar', color: css('--venda'), shape: 'arrowDown'}); }); mk.sort((x, y) => x.time < y.time ? -1 : 1); s1.setMarkers(mk); }
+  g.timeScale().fitContent();
+}
+
+/* ---- método dinâmico ao vivo ---- */
+const COMITES = {top1: ['Top-1 (a melhor sozinha)', 1, 1, false], top2: ['Top-2 unânime (as 2 melhores concordam)', 2, 2, false], top3: ['Top-3 maioria (2 de 3)', 3, 2, false],
+  top5: ['Top-5 maioria (3 de 5)', 5, 3, false], div3: ['Diverso-3 maioria (melhores de 3 estudos diferentes)', 3, 2, true], div5: ['Diverso-5 maioria (3 de 5)', 5, 3, true]};
+const DIN = {universo: 'Todas (~7 mil)', janela: 750, criterio: 'sharpe', comite: 'top3', filtro: '0'};
+function pedeDinamico(par) { return new Promise(res => { LAB.worker.onmessage = e => { if (e.data.tipo === 'dinamico') res(e.data); }; LAB.worker.postMessage({tipo: 'dinamico', par}); }); }
+async function labDinamico() {
+  const D_ = await labCarrega(LAB.tk), corpo = $('#l-corpo');
+  corpo.innerHTML = `
+  <section class="cartao"><h3>Método dinâmico</h3>
+    <p class="muted">A cada 5 pregões, olhando só o passado, o método escolhe as configurações que melhor funcionaram na janela e segue a escolha. Nada do futuro é usado. Ele só começa a operar depois de 6 anos de histórico.</p>
+    <label>Entre quais estratégias escolher<select id="d-uni">${opt([['Todas (~7 mil)', 'Todas (~7 mil)'], ['IFR + HiLo', 'Só IFR com stop HiLo'], ['Enxuto (clássicos)', 'Só as clássicas (parâmetros de livro)']], DIN.universo)}</select></label>
+    <div class="lin"><label>Olhar para trás<select id="d-jan">${opt([[250, '1 ano'], [500, '2 anos'], [750, '3 anos'], [1000, '4 anos'], [1250, '5 anos'], [0, 'Todo o histórico']], DIN.janela)}</select></label>
+    <label>Critério<select id="d-cri">${opt([['retorno', 'Maior retorno'], ['sharpe', 'Retorno por risco (Sharpe)'], ['multi', 'Retorno estável (3 janelas)']], DIN.criterio)}</select></label></div>
+    <label>Comitê<select id="d-com">${opt(Object.entries(COMITES).map(([k, v]) => [k, v[0]]), DIN.comite)}</select></label>
+    <label>Filtro de tendência<select id="d-fil">${opt([['0', 'Sem filtro'], ['1', 'Só comprar acima da média de 200 dias']], DIN.filtro)}</select></label>
+    <button class="btn" id="d-rodar">Simular</button>
+    <button class="btn sec" id="d-rec">Usar a carteira recomendada (3 anos, Sharpe, Top-3)</button></section><div id="d-res"></div>`;
+  const le = () => { DIN.universo = $('#d-uni').value; DIN.janela = +$('#d-jan').value; DIN.criterio = $('#d-cri').value; DIN.comite = $('#d-com').value; DIN.filtro = $('#d-fil').value; };
+  $('#d-rec').onclick = () => { Object.assign(DIN, {universo: 'Todas (~7 mil)', janela: 750, criterio: 'sharpe', comite: 'top3', filtro: '0'}); labDinamico(); };
+  $('#d-rodar').onclick = async () => {
+    le(); const el = $('#d-res');
+    el.innerHTML = `<section class="cartao"><div class="vazio">Preparando as ${Motor.GR.ESTUDOS.length * Motor.GR.STOPS.length} estratégias deste papel…<br><b id="l-prog">0%</b><br><span class="muted">(só na primeira vez de cada papel; leva de 15 a 60 s no celular)</span></div></section>`;
+    const info = await indexa(D_); if (LAB.sub !== 'dinamico') return;
+    if (info.erro) { el.innerHTML = '<section class="cartao"><div class="vazio">Faltou memória no aparelho para simular as 6.968 estratégias deste papel. Feche outros aplicativos e tente de novo.</div></section>'; return; }
+    if (!info.dinOk) { el.innerHTML = '<section class="cartao"><div class="vazio">Este papel tem menos de 6 anos de histórico: o método dinâmico não tem dados para operar. Use as abas Ranking e Montar.</div></section>'; return; }
+    el.innerHTML = '<section class="cartao"><div class="vazio">Simulando o método dinâmico…</div></section>';
+    const [, top, voto, diverso] = COMITES[DIN.comite];
+    const r = await pedeDinamico({universo: DIN.universo, janela: DIN.janela, criterio: DIN.criterio, top, voto, diverso, filtro200: DIN.filtro === '1'});
+    if (r.erro) { el.innerHTML = `<section class="cartao"><div class="vazio">${r.erro}</div></section>`; return; }
+    let [a, b] = fatia(D_.d, LAB.ini, LAB.fim); const primeira = r.t0 + 1;
+    const aviso = a < primeira ? `O método começa a operar em ${dataBR(D_.d[r.t0])}; o período foi ajustado.` : '';
+    a = Math.max(a, primeira);
+    const at = r.atual, hoje = at.hoje ? 'comprado' : 'fora do mercado';
+    const acao = at.hoje ? (at.amanha ? ['mantem', 'MANTER COMPRADO'] : ['venda', 'VENDER na abertura']) : (at.amanha ? ['compra', 'COMPRAR na abertura'] : ['fora', 'FICAR FORA']);
+    const ult = D_.d.at(-1);
+    const mud = []; let ant = -1; for (let t = r.t0; t < D_.d.length; t++) { if (r.esc[t] !== ant) { mud.push({d: D_.d[t], k: r.esc[t]}); ant = r.esc[t]; } }
+    const NS = Motor.GR.STOPS.length, nm = k => Motor.descreve(Motor.GR.ESTUDOS[(k / NS) | 0], Motor.GR.STOPS[k % NS]);
+    el.innerHTML = `
+    <section class="cartao"><h3>O que o método manda fazer agora (${dataBR(ult)})</h3>
+      <div class="ordem c-${acao[0] === 'compra' ? 'c' : acao[0] === 'venda' ? 'v' : 'm'}"><div><div class="tag">${acao[1]}</div><div class="nm">Hoje na simulação: ${hoje}</div></div></div>
+      <p class="muted">Configurações escolhidas hoje (${at.votos} de ${at.membros.length} indicam compra):</p>
+      <ul class="lista">${at.membros.map(m => `<li>${m.quer ? '✅' : '⬜'} ${m.nome}${m.stop ? ' · stop ' + (LAB.tk === '^BVSP' ? Math.round(m.stop).toLocaleString('pt-BR') + ' pts' : brl(m.stop)) : ''}</li>`).join('')}</ul></section>
+    <div id="d-core"></div>
+    <section class="cartao"><h3>Quem liderou ao longo do tempo</h3><p class="muted">Primeira colocada em cada reavaliação (mudanças mais recentes primeiro). Repare como o melhor indicador muda com o mercado.</p>
+      <div class="rolagem" style="max-height:320px"><table><tr><th>Desde</th><th style="text-align:left">Configuração líder</th></tr>${mud.slice(-60).reverse().map(x => `<tr><td>${dataBR(x.d)}</td><td style="text-align:left;white-space:normal;font-size:12px">${nm(x.k)}</td></tr>`).join('')}</table></div></section>`;
+    renderRes($('#d-core'), D_, {eq: r.eq, hold: r.hold, ent: r.ent}, a, b, (aviso ? aviso + ' ' : '') + 'Atenção: o desempenho passado de uma variante não prevê o futuro. No estudo, a variante que ia melhor em 2006–2014 não foi a melhor em 2015–2026.');
+  };
 }
 
 /* ---- comparar papéis ---- */
