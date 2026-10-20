@@ -14,7 +14,12 @@ let aba = 'radar', graficos = [], observadores = [];
 
 /* ---------------- dados ---------------- */
 async function busca(arq) { const r = await fetch('data/' + arq + '?v=' + Date.now()); if (!r.ok) throw new Error(arq); return r.json(); }
-async function hist(tk) { const k = tk.replace('^', ''); if (!D.hist[k]) D.hist[k] = await busca('hist/' + k + '.json'); return D.hist[k]; }
+async function hist(tk) {   // últimos ~3 anos (histórico completo + pregões recentes), para os gráficos
+  const k = tk.replace('^', '');
+  if (!D.hist[k]) { const x = await labCarrega(tk), n = x.d.length, i0 = Math.max(0, n - 760);
+    D.hist[k] = {papel: tk, nome: x.nome, d: x.d.slice(i0), o: Array.from(x.o.subarray(i0)), h: Array.from(x.h.subarray(i0)), l: Array.from(x.l.subarray(i0)), c: Array.from(x.c.subarray(i0))}; }
+  return D.hist[k];
+}
 function preco(tk) {
   const c = D.cot && D.cot.precos && D.cot.precos[tk];
   if (c && c.preco) return {preco: c.preco, quando: D.cot.atualizado, fonte: 'cotação'};
@@ -60,7 +65,8 @@ function grafico(el, alt, log) {
   graficos.push(g); return g;
 }
 const serieLinha = (d, v) => d.map((t, i) => ({time: t, value: v[i]})).filter(x => x.value != null);
-function abre(t) { aba = t; document.querySelectorAll('#nav button').forEach(b => b.setAttribute('aria-current', b.dataset.t === t)); limpaGraficos(); window.scrollTo(0, 0); TELAS[t](); try { localStorage.setItem('radarb3.aba', t); } catch (e) {} }
+const DENTRO_DE_MAIS = ['desempenho', 'ajustes', 'estudo'];
+function abre(t) { aba = t; document.querySelectorAll('#nav button').forEach(b => b.setAttribute('aria-current', b.dataset.t === (DENTRO_DE_MAIS.includes(t) ? 'mais' : t))); limpaGraficos(); window.scrollTo(0, 0); TELAS[t](); try { localStorage.setItem('radarb3.aba', t); } catch (e) {} }
 
 /* ---------------- RADAR ---------------- */
 function telaRadar() {
@@ -270,7 +276,19 @@ function telaAjustes() {
     $('#a-x').onclick = () => $('#dlg').close(); $('#a-ok').onclick = () => { salva({capital: cart().capital, inicio: new Date().toISOString(), ops: []}); $('#dlg').close(); abre('carteira'); }; $('#dlg').showModal(); };
 }
 
-const TELAS = {radar: telaRadar, carteira: telaCarteira, mercado: () => telaMercado(), desempenho: telaDesempenho, ajustes: telaAjustes};
+function telaMais() {
+  $('#tela').innerHTML = `<section class="cartao"><h2>Mais</h2><div class="lista">
+    <div class="item" data-t="estudo"><span class="tk" style="min-width:130px">Estudo completo</span><span class="nm" style="white-space:normal">Dashboard do estudo: 972 carteiras, ranking no tempo, método dinâmico papel a papel</span></div>
+    <div class="item" data-t="desempenho"><span class="tk" style="min-width:130px">Desempenho</span><span class="nm" style="white-space:normal">Minha carteira simulada × método × IBOV</span></div>
+    <div class="item" data-t="ajustes"><span class="tk" style="min-width:130px">Ajustes</span><span class="nm" style="white-space:normal">Notificações, capital, backup da carteira</span></div></div></section>`;
+  document.querySelectorAll('.item[data-t]').forEach(e => e.onclick = () => abre(e.dataset.t));
+}
+function telaEstudo() {
+  $('#tela').innerHTML = `<section class="cartao" style="padding:8px"><button class="btn sec" id="volta">← Mais</button>
+    <iframe src="estudo/index.html" title="Estudo completo" style="width:100%;height:calc(100vh - 230px);min-height:420px;border:0;border-radius:8px"></iframe></section>`;
+  $('#volta').onclick = () => abre('mais');
+}
+const TELAS = {radar: telaRadar, carteira: telaCarteira, mercado: () => telaMercado(), lab: () => telaLab(), mais: telaMais, estudo: telaEstudo, desempenho: telaDesempenho, ajustes: telaAjustes};
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => abre(b.dataset.t));
 
 (async () => {
