@@ -93,6 +93,7 @@ async function telaLab() {
   <section class="cartao"><h2>Laboratório de estratégias</h2>
     <p class="muted">Teste qualquer indicador (ou 2 a 3 combinados), com ou sem stop, em qualquer período. Sinal no fechamento, ordem na abertura do dia seguinte, custo de 0,07% por ordem.</p>
     <label>Papel<select id="l-tk">${opt(papeis, LAB.tk)}</select></label>
+    ${dados_.d.length < 1500 ? `<p class="muted" style="color:var(--venda)">Histórico curto: ${dados_.d.length} pregões (desde ${dataBR(dados_.d[0])}). Resultados valem pouco estatisticamente, e o método dinâmico precisa de cerca de 6 anos de dados.</p>` : ''}
     <div class="lin"><label>Início<input id="l-ini" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.ini}"></label>
     <label>Fim<input id="l-fim" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.fim}"></label></div>
     <div class="lin"><label>Capital (R$)<input id="l-cap" type="number" inputmode="decimal" value="${LAB.capital}"></label>

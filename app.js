@@ -254,11 +254,28 @@ async function telaPapel(tk) {
 /* ---------------- DESEMPENHO ---------------- */
 async function telaDesempenho() {
   const c = cart();
-  $('#tela').innerHTML = `<section class="cartao"><h2>Minha simulação × método × IBOV</h2>
+  $('#tela').innerHTML = `<section class="cartao"><h2>Método ao vivo (ordens oficiais)</h2>
+    <p class="muted">Carteira que segue exatamente os alertas enviados desde 20/10/2026: R$ 5.000, ordens na abertura do pregão seguinte, custo de 0,07% e caixa no CDI. Não é refeita depois: é o placar real do método.</p>
+    <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Método ao vivo</span><span><i style="background:${css('--linha-i')}"></i>IBOV</span><span><i style="background:${css('--linha-c')}"></i>CDI</span></div>
+    <div class="graf" id="g-v"></div><div class="kpis" id="k-v"></div><div id="p-v"></div></section>
+  <section class="cartao"><h2>Minha simulação × método × IBOV</h2>
     <p class="muted">Desde o início da sua carteira simulada (${dataBR(c.inicio)}), com o mesmo capital inicial.</p>
     <div class="legenda"><span><i style="background:${css('--acento')}"></i>Minha carteira</span><span><i style="background:${css('--linha-m')}"></i>Método</span><span><i style="background:${css('--linha-i')}"></i>IBOV</span></div>
     <div class="graf" id="g-d"></div><div class="kpis" id="k-d"></div>
     <p class="muted">Este é o teste ao vivo: se, ao longo de semanas, o método e a sua simulação se comportarem como no histórico, ganha-se confiança para usar dinheiro real.</p></section>`;
+  try {
+    const A = await busca('acompanhamento.json');
+    if (A.datas.length < 1) $('#k-v').innerHTML = '<div class="vazio" style="grid-column:1/-1">O acompanhamento começa no primeiro pregão depois do alerta. Volte amanhã.</div>';
+    else {
+      const gv = grafico($('#g-v'), 220, true), ser = (cor, w, arr) => gv.addLineSeries({color: cor, lineWidth: w, priceLineVisible: false}).setData([{time: A.inicio, value: A.capital}, ...A.datas.map((d, i) => ({time: d, value: arr[i]}))]);
+      ser(css('--linha-m'), 3, A.patrimonio); ser(css('--linha-i'), 2, A.ibov); ser(css('--linha-c'), 1, A.cdi); gv.timeScale().fitContent();
+      const kp = (r, v) => `<div class="kpi"><div class="r">${r}</div><div class="v ${v >= A.capital ? 'pos' : 'neg'}">${pct(v / A.capital - 1)}</div><div class="muted">${brl(v)}</div></div>`;
+      $('#k-v').innerHTML = kp('Método ao vivo', A.patrimonio.at(-1)) + kp('IBOV', A.ibov.at(-1)) + kp('CDI', A.cdi.at(-1)) + `<div class="kpi"><div class="r">Pregões</div><div class="v">${A.datas.length}</div><div class="muted">desde ${dataBR(A.inicio)}</div></div>`;
+      $('#p-v').innerHTML = `<h3>Posições do método hoje</h3><table><tr><th>Papel</th><th>Qtd</th><th>Compra</th><th>Últ.</th><th>Res.</th></tr>${A.posicoes.map(p => `<tr><td>${p.papel}</td><td>${p.qtd}</td><td>${brl(p.preco_compra)}<br><span class="muted">${dataBR(p.data_compra)}</span></td><td>${brl(p.fechamento)}</td><td class="${p.fechamento >= p.preco_compra ? 'pos' : 'neg'}">${pct(p.fechamento / p.preco_compra - 1)}</td></tr>`).join('')}<tr><td>Caixa</td><td colspan="4">${brl(A.caixa)}</td></tr></table>
+        <details><summary class="muted">Operações do método (${A.operacoes.length})</summary><table><tr><th>Data</th><th>Op.</th><th>Papel</th><th>Qtd</th><th>Preço</th></tr>${A.operacoes.slice().reverse().map(o => `<tr><td>${dataBR(o.data)}</td><td class="${o.tipo === 'C' ? 'pos' : 'neg'}">${o.tipo === 'C' ? 'Compra' : 'Venda'}</td><td>${o.papel}</td><td>${o.qtd}</td><td>${brl(o.preco)}</td></tr>`).join('')}</table></details>
+        <p class="muted">Poucas semanas não dizem nada estatisticamente: o histórico mostra anos bons e ruins. Use isto para ver se o método se comporta como esperado, não para julgá-lo cedo demais.</p>`;
+    }
+  } catch (e) { $('#k-v').innerHTML = '<div class="vazio" style="grid-column:1/-1">O placar ao vivo aparece depois da próxima atualização diária.</div>'; }
   const ini = c.inicio.slice(0, 10), C = D.radar.curva;
   const papeis = [...new Set(c.ops.map(o => o.papel))]; const hs = {}; for (const p of papeis) hs[p] = await hist(p);
   const ib = await hist('^BVSP'); const dias = ib.d.filter(d => d >= ini);
@@ -306,7 +323,7 @@ function telaAjustes() {
 function telaMais() {
   $('#tela').innerHTML = `<section class="cartao"><h2>Mais</h2><div class="lista">
     <div class="item" data-t="estudo"><span class="tk" style="min-width:130px">Estudo completo</span><span class="nm" style="white-space:normal">Dashboard do estudo: 972 carteiras, ranking no tempo, método dinâmico papel a papel</span></div>
-    <div class="item" data-t="desempenho"><span class="tk" style="min-width:130px">Desempenho</span><span class="nm" style="white-space:normal">Minha carteira simulada × método × IBOV</span></div>
+    <div class="item" data-t="desempenho"><span class="tk" style="min-width:130px">Desempenho</span><span class="nm" style="white-space:normal">Placar ao vivo do método e da minha carteira simulada × IBOV</span></div>
     <div class="item" data-t="ajustes"><span class="tk" style="min-width:130px">Ajustes</span><span class="nm" style="white-space:normal">Notificações, capital, backup da carteira</span></div></div></section>`;
   document.querySelectorAll('.item[data-t]').forEach(e => e.onclick = () => abre(e.dataset.t));
 }
