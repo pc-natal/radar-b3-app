@@ -263,6 +263,7 @@ async function labDinamico() {
   const D_ = await labCarrega(LAB.tk), corpo = $('#l-corpo');
   corpo.innerHTML = `
   <section class="cartao"><h3>Método dinâmico</h3>
+    <p style="border-left:4px solid var(--mantem);padding-left:10px"><b>Esta aba testa o método numa única ação: ${nomeTk(LAB.tk)}</b> (a do campo Papel). Ele escolhe os melhores indicadores para ela, mas não troca de ação. Para o método escolhendo <b>quais ações</b> ter, como no Radar, use a aba <a href="#" id="d-ir-cart">Carteira</a>.</p>
     <p class="muted">A cada 5 pregões, olhando só o passado, o método escolhe as configurações que melhor funcionaram na janela e segue a escolha. Nada do futuro é usado. Ele só começa a operar depois de 6 anos de histórico.</p>
     <label>Entre quais estratégias escolher<select id="d-uni">${opt([['Todas (~7 mil)', 'Todas (~7 mil)'], ['IFR + HiLo', 'Só IFR com stop HiLo'], ['Enxuto (clássicos)', 'Só as clássicas (parâmetros de livro)']], DIN.universo)}</select></label>
     <div class="lin"><label>Olhar para trás<select id="d-jan">${opt([[250, '1 ano'], [500, '2 anos'], [750, '3 anos'], [1000, '4 anos'], [1250, '5 anos'], [0, 'Todo o histórico']], DIN.janela)}</select></label>
@@ -270,7 +271,8 @@ async function labDinamico() {
     <label>Comitê<select id="d-com">${opt(Object.entries(COMITES).map(([k, v]) => [k, v[0]]), DIN.comite)}</select></label>
     <label>Filtro de tendência<select id="d-fil">${opt([['0', 'Sem filtro'], ['1', 'Só comprar acima da média de 200 dias']], DIN.filtro)}</select></label>
     <button class="btn" id="d-rodar">Simular</button>
-    <button class="btn sec" id="d-rec">Usar a carteira recomendada (3 anos, Sharpe, Top-3)</button></section><div id="d-res"></div>`;
+    <button class="btn sec" id="d-rec">Preencher com: 3 anos, Sharpe, Top-3</button></section><div id="d-res"></div>`;
+  $('#d-ir-cart').onclick = e => { e.preventDefault(); LAB.sub = 'carteira'; telaLab(); };
   const le = () => { DIN.universo = $('#d-uni').value; DIN.janela = +$('#d-jan').value; DIN.criterio = $('#d-cri').value; DIN.comite = $('#d-com').value; DIN.filtro = $('#d-fil').value; };
   $('#d-rec').onclick = () => { Object.assign(DIN, {universo: 'Todas (~7 mil)', janela: 750, criterio: 'sharpe', comite: 'top3', filtro: '0'}); labDinamico(); };
   $('#d-rodar').onclick = async () => {
