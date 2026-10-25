@@ -54,6 +54,64 @@ function registra(tipo, papel, qtd, px, origem) {
   salva(c); return true;
 }
 
+/* ---------------- ordens agendadas ----------------
+   Com a bolsa fechada (noite, fim de semana, feriado), a ordem fica "aguardando abertura" e é executada
+   pelo PREÇO DE ABERTURA do pregão seguinte, como a ordem a mercado no leilão de abertura de uma corretora. */
+const agoraBRT = () => new Date(Date.now() - 3 * 3600e3);          // ler com getUTC*
+const hojeBRT = () => agoraBRT().toISOString().slice(0, 10);
+function fechamentoB3() {   // 17h quando os EUA estão no horário de verão; 18h no resto do ano
+  try { return /EDT/.test(new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', timeZoneName: 'short'}).format(new Date())) ? 17 : 18; } catch (e) { return 17; }
+}
+function bolsaAberta() {
+  const a = agoraBRT(), dia = a.getUTCDay(), h = a.getUTCHours() + a.getUTCMinutes() / 60;
+  if (dia === 0 || dia === 6 || h < 10 || h >= fechamentoB3()) return false;
+  const pr = D.cot && D.cot.precos ? Object.values(D.cot.precos) : [];
+  return pr.some(x => (x.hora || '').slice(0, 10) === hojeBRT());   // feriado: não há cotação de hoje
+}
+function patrimonioEst() { const {caixa, lista} = posicoes(cart()); return caixa + lista.reduce((s, p) => s + p.qtd * ((preco(p.papel) || {}).preco || 0), 0); }
+function pendente(tipo, papel) { return (cart().pend || []).find(p => p.tipo === tipo && p.papel === papel); }
+/* executa já (bolsa aberta) ou agenda (bolsa fechada). Compra: qtd fixa ou valor em R$. Devolve texto do que fez, ou null. */
+function ordem(tipo, papel, {qtd = null, valor = null} = {}, origem = 'manual') {
+  const px = preco(papel); if (!px) { alerta('Sem preço para ' + papel + '.'); return null; }
+  if (bolsaAberta()) {
+    if (tipo === 'C' && qtd == null) qtd = Math.floor(Math.min(valor, posicoes(cart()).caixa) / px.preco);
+    if (tipo === 'V' && qtd == null) qtd = (posicoes(cart()).lista.find(x => x.papel === papel) || {}).qtd || 0;
+    return registra(tipo, papel, qtd, px, origem) ? `${tipo === 'C' ? 'Comprou' : 'Vendeu'} ${qtd} ${papel} a ${brl(px.preco)}` : null;
+  }
+  if (pendente(tipo, papel)) return `${papel}: já havia uma ordem agendada`;
+  const c = cart(); c.pend = c.pend || [];
+  c.pend.push({id: Date.now() + Math.random(), criado: new Date().toISOString(), tipo, papel, qtd, valor, origem});
+  salva(c);
+  return `⏳ ${tipo === 'C' ? 'Compra' : 'Venda'} de ${qtd ? qtd + ' ' : ''}${papel} agendada${valor ? ' (cerca de ' + brl(valor) + ')' : ''}`;
+}
+const NOTA_AGENDA = 'A bolsa está fechada agora. As ordens agendadas serão executadas pelo preço de abertura do próximo pregão (10h). Você pode cancelar na aba Carteira até lá.';
+/* executa as ordens agendadas cujo pregão já abriu, pelo preço de abertura */
+async function processaPendentes() {
+  const c0 = cart(); if (!c0.pend || !c0.pend.length) return [];
+  let rec = {}; try { rec = await busca('recent.json'); } catch (e) {}
+  const abertura = (t, criado) => {
+    const lim = new Date(criado), ok = d => new Date(d + 'T10:00:00-03:00') > lim;
+    let rc = null; const r = rec[t]; if (r) for (let i = 0; i < r.d.length; i++) if (ok(r.d[i]) && r.o[i] > 0) { rc = {d: r.d[i], o: r.o[i]}; break; }
+    const q = D.cot && D.cot.precos && D.cot.precos[t];
+    const cc = q && q.abertura && q.dia && ok(q.dia) && new Date(q.dia + 'T10:00:00-03:00') <= new Date() ? {d: q.dia, o: q.abertura} : null;
+    if (cc && (!rc || rc.d >= cc.d)) return cc;    // cotação real do dia tem preferência
+    return rc;
+  };
+  const feitas = [], fila = c0.pend.slice().sort((a, b) => (a.tipo === 'V' ? 0 : 1) - (b.tipo === 'V' ? 0 : 1) || a.criado.localeCompare(b.criado));
+  for (const p of fila) {
+    const ab = abertura(p.papel, p.criado); if (!ab) continue;
+    const c = cart(), {caixa, lista} = posicoes(c); let q;
+    if (p.tipo === 'V') { const pos = lista.find(x => x.papel === p.papel); q = Math.min(p.qtd || Infinity, pos ? pos.qtd : 0); }
+    else q = Math.floor(Math.min(p.valor != null ? p.valor : p.qtd * ab.o, caixa) / ab.o);
+    if (q > 0) { c.ops.push({id: Date.now() + Math.random(), quando: new Date(ab.d + 'T10:00:00-03:00').toISOString(), tipo: p.tipo, papel: p.papel, qtd: q, preco: Math.round(ab.o * 100) / 100, ref: 'abertura de ' + ab.d, origem: p.origem});
+      feitas.push(`${p.tipo === 'C' ? 'Comprou' : 'Vendeu'} ${q} ${p.papel} a ${brl(ab.o)} (abertura de ${dataBR(ab.d)})`); }
+    else feitas.push(`${p.papel}: ordem não executada (${p.tipo === 'C' ? 'saldo insuficiente' : 'sem ações para vender'})`);
+    c.pend = c.pend.filter(x => x.id !== p.id); salva(c);
+  }
+  return feitas;
+}
+function cancelaPendente(id) { const c = cart(); c.pend = (c.pend || []).filter(x => String(x.id) !== String(id)); salva(c); }
+
 /* ---------------- interface comum ---------------- */
 function alerta(msg) { const d = $('#dlg'); $('#dlg-c').innerHTML = `<p>${msg}</p><button class="btn" id="dlg-ok">OK</button>`; $('#dlg-ok').onclick = () => d.close(); d.showModal(); return false; }
 function limpaGraficos() { observadores.forEach(o => o.disconnect()); observadores = []; graficos.forEach(g => { try { g.remove(); } catch (e) {} }); graficos = []; }
@@ -145,12 +203,13 @@ function acoesMinhas() {
 function cartaoMeu() {
   const R = D.radar, A = acoesMinhas(), dt = R.detalhes;
   const linha = (cls, rot, t, txt, botao) => `<div class="ordem ${cls}" style="margin:8px 0"><div style="flex:1"><div class="tag">${rot}</div><div class="tk">${t}</div><div class="nm">${txt}</div></div>${botao || ''}</div>`;
-  const bt = (acao, t, rot, cor) => `<button class="btn ${cor}" style="width:auto;margin:0;padding:10px 14px" data-acao="${acao}" data-tk="${t}">${rot}</button>`;
+  const bt = (acao, t, rot, cor) => pendente(acao, t) ? `<span class="muted" style="text-align:right;font-size:13px">⏳ agendada<br>para a abertura</span>`
+    : `<button class="btn ${cor}" style="width:auto;margin:0;padding:10px 14px" data-acao="${acao}" data-tk="${t}">${rot}</button>`;
   let corpo;
   if (A.vazia) corpo = `<p>Sua carteira simulada está vazia. Para começar, toque no botão verde abaixo, em <b>Começar a simulação copiando a carteira do método</b>.</p>`;
   else {
     const urg = A.vender.length + A.comprar.length;
-    corpo = (urg ? `<p><b>${urg === 1 ? 'Há 1 ação' : 'Há ' + urg + ' ações'} para você fazer hoje.</b> Toque no botão de cada uma (ou faça na sua corretora, se um dia usar dinheiro real).</p>`
+    corpo = (urg ? `<p><b>${urg === 1 ? 'Há 1 ação' : 'Há ' + urg + ' ações'} para você fazer.</b> Toque no botão de cada uma. ${bolsaAberta() ? 'A bolsa está aberta: a ordem é executada agora, pela cotação do momento.' : 'A bolsa está fechada: a ordem fica <b>agendada</b> e é executada pelo preço de abertura do próximo pregão, às 10h. Não precisa esperar o pregão abrir.'}</p>`
                  : `<p style="font-size:17px">✅ <b>Nada a fazer hoje.</b> Sua carteira já está de acordo com o método.</p>`)
       + A.vender.map(t => linha('c-v', '🔴 VENDER — o método saiu desta ação', t, 'Você tem esta ação. Venda na abertura do pregão.', bt('V', t, 'Vender', 'v'))).join('')
       + A.comprar.map(t => linha('c-c', '🟢 COMPRAR — sinal novo do método', t, `Fechou a ${brl(dt[t] && dt[t].fechamento)}. Compre na abertura do pregão.`, bt('C', t, 'Comprar', 'c'))).join('')
@@ -162,18 +221,18 @@ function cartaoMeu() {
     ${corpo}</section>`;
 }
 function acaoMinha(tipo, t) {
-  const R = D.radar, px = preco(t); if (!px) return alerta('Sem preço para ' + t + '.');
-  if (tipo === 'V') { const p = posicoes(cart()).lista.find(x => x.papel === t); if (p && registra('V', t, p.qtd, px, 'radar')) alerta(`Vendeu ${p.qtd} ${t} a ${brl(px.preco)} (simulado).`); }
-  else { const {caixa, lista} = posicoes(cart()), livres = Math.max(1, R.vagas - lista.length); const q = Math.floor(Math.min(caixa, caixa / Math.min(livres, Math.max(1, acoesMinhas().comprar.length))) / px.preco);
-    if (q > 0 && registra('C', t, q, px, 'radar')) alerta(`Comprou ${q} ${t} a ${brl(px.preco)} (simulado).`); else if (q <= 0) alerta('Saldo insuficiente na carteira simulada. Venda primeiro o que o método mandou vender.'); }
+  const R = D.radar, aberta = bolsaAberta();
+  const r = tipo === 'V' ? ordem('V', t, {qtd: (posicoes(cart()).lista.find(x => x.papel === t) || {}).qtd || null}, 'radar')
+                         : ordem('C', t, {valor: patrimonioEst() / R.vagas}, 'radar');
   telaRadar();
+  if (r) alerta(r + (aberta ? ' (simulado).' : '.<br><br>' + NOTA_AGENDA));
 }
 function copiaMetodo() {
   // compra, em partes iguais, as ações que o método terá no próximo pregão (manter + comprar)
   const R = D.radar, alvo = [...R.ordens.manter, ...R.ordens.comprar].slice(0, R.vagas); const feitas = [];
   const fatia = posicoes(cart()).caixa / R.vagas;
-  for (const t of alvo) { const px = preco(t); if (!px) continue; const q = Math.floor(fatia / px.preco); if (q > 0 && registra('C', t, q, px, 'cópia do método')) feitas.push(`Comprou ${q} ${t} a ${brl(px.preco)}`); }
-  alerta(feitas.length ? 'Simulação iniciada:<br>' + feitas.join('<br>') + '<br><br>A partir de agora, siga as ordens diárias com o botão "Executar".' : 'Nada a copiar.');
+  for (const t of alvo) { const r = ordem('C', t, {valor: fatia}, 'cópia do método'); if (r) feitas.push(r); }
+  alerta(feitas.length ? 'Simulação iniciada:<br>' + feitas.join('<br>') + (bolsaAberta() ? '' : '<br><br>' + NOTA_AGENDA) + '<br><br>A partir de agora, siga o quadro "O que fazer na SUA carteira", no topo do Radar.' : 'Nada a copiar.');
 }
 function contextoRadar() {
   const R = D.radar, o = R.ordens, d = R.detalhes, {caixa, lista} = posicoes(cart());
@@ -187,12 +246,12 @@ function perguntaClaude(texto) {
   window.open('https://claude.ai/new?q=' + encodeURIComponent(texto), '_blank');
 }
 function executaOrdens() {
-  const R = D.radar, c = cart(); let feitas = [];
-  for (const t of R.ordens.vender) { const q = posicoes(cart()).lista.find(x => x.papel === t); if (q) { const px = preco(t); if (registra('V', t, q.qtd, px, 'radar')) feitas.push(`Vendeu ${q.qtd} ${t} a ${brl(px.preco)}`); } }
-  const {caixa, lista} = posicoes(cart()); const livres = Math.max(1, R.vagas - lista.length);
-  const fatia = caixa / Math.max(livres, R.ordens.comprar.length);
-  for (const t of R.ordens.comprar) { const px = preco(t); if (!px) continue; const q = Math.floor(fatia / px.preco); if (q > 0 && registra('C', t, q, px, 'radar')) feitas.push(`Comprou ${q} ${t} a ${brl(px.preco)}`); }
-  alerta(feitas.length ? 'Registrado na carteira simulada:<br>' + feitas.join('<br>') : 'Nada a executar (sem posições para vender ou sem saldo).');
+  const R = D.radar, feitas = [], aberta = bolsaAberta();
+  for (const t of R.ordens.vender) { const q = posicoes(cart()).lista.find(x => x.papel === t); if (q) { const r = ordem('V', t, {qtd: q.qtd}, 'radar'); if (r) feitas.push(r); } }
+  const tenho = new Set(posicoes(cart()).lista.map(p => p.papel)), valor = patrimonioEst() / R.vagas;
+  for (const t of R.ordens.comprar) if (!tenho.has(t)) { const r = ordem('C', t, {valor}, 'radar'); if (r) feitas.push(r); }
+  telaRadar();
+  alerta(feitas.length ? 'Registrado na carteira simulada:<br>' + feitas.join('<br>') + (aberta ? '' : '<br><br>' + NOTA_AGENDA) : 'Nada a executar (sem posições para vender ou sem saldo).');
 }
 
 /* ---------------- CARTEIRA SIMULADA ---------------- */
@@ -207,6 +266,9 @@ function telaCarteira() {
     <div class="kpi"><div class="r">Em caixa</div><div class="v">${brl(caixa)}</div></div><div class="kpi"><div class="r">Desde</div><div class="v" style="font-size:15px">${dataBR(c.inicio)}</div></div></div>
     <div class="lin"><button class="btn c" id="b-comprar">Comprar</button><button class="btn v" id="b-vender">Vender</button></div>
   </section>
+  ${(c.pend || []).length ? `<section class="cartao" style="border:2px solid var(--mantem)"><h3>⏳ Ordens agendadas</h3>
+    <p class="muted">Serão executadas pelo preço de abertura do próximo pregão (10h). Ao abrir o app depois disso, elas aparecem no histórico.</p>
+    ${c.pend.map(p => `<div class="ordem ${p.tipo === 'C' ? 'c-c' : 'c-v'}" style="margin:6px 0"><div style="flex:1"><div class="tag">${p.tipo === 'C' ? 'Comprar' : 'Vender'}</div><div class="tk">${p.papel}</div><div class="nm">${p.qtd ? p.qtd + ' ações' : 'cerca de ' + brl(p.valor)} · pedida em ${horaBR(p.criado)}</div></div><button class="btn sec" style="width:auto;margin:0;padding:8px 12px" data-cancela="${p.id}">Cancelar</button></div>`).join('')}</section>` : ''}
   <section class="cartao"><h3>Posições</h3><div class="lista">${linhas.join('') || '<div class="vazio">Nenhuma posição. Use Comprar ou o botão do Radar.</div>'}</div></section>
   <section class="cartao"><h3>Histórico de operações</h3>
     <table><tr><th>Data</th><th>Op.</th><th>Papel</th><th>Qtd</th><th>Preço</th></tr>
@@ -214,6 +276,7 @@ function telaCarteira() {
     <p class="muted">Preço usado: última cotação disponível (atraso de cerca de 15 minutos) ou o último fechamento.</p>
   </section>`;
   $('#b-comprar').onclick = () => dlgOrdem('C'); $('#b-vender').onclick = () => dlgOrdem('V');
+  document.querySelectorAll('[data-cancela]').forEach(b => b.onclick = () => { cancelaPendente(b.dataset.cancela); telaCarteira(); });
   document.querySelectorAll('.item[data-tk]').forEach(e => e.onclick = () => dlgOrdem('V', e.dataset.tk));
 }
 function dlgOrdem(tipo, tk) {
@@ -233,7 +296,8 @@ function dlgOrdem(tipo, tk) {
   $('#o-q').oninput = () => { delete $('#o-q').dataset.auto; atual(); };
   atual();
   $('#o-x').onclick = () => $('#dlg').close();
-  $('#o-ok').onclick = () => { const t = $('#o-tk').value; if (registra(tipo, t, +$('#o-q').value, preco(t))) { $('#dlg').close(); abre('carteira'); } };
+  if (!bolsaAberta()) $('#o-tot').insertAdjacentHTML('afterend', '<p class="muted" style="color:var(--mantem)">⏳ Bolsa fechada: a ordem fica agendada e será executada pelo preço de abertura do próximo pregão (10h).</p>');
+  $('#o-ok').onclick = () => { const t = $('#o-tk').value, aberta = bolsaAberta(), r = ordem(tipo, t, {qtd: +$('#o-q').value}, 'manual'); if (r) { $('#dlg').close(); abre('carteira'); if (!aberta) alerta(r + '.<br><br>' + NOTA_AGENDA); } };
   $('#dlg').showModal();
 }
 
@@ -400,6 +464,8 @@ document.querySelectorAll('#nav button').forEach(b => b.onclick = () => abre(b.d
     [D.radar, D.universo] = await Promise.all([busca('radar.json'), busca('universo.json')]);
     try { D.cot = await busca('cotacoes.json'); } catch (e) { D.cot = null; }
     $('#sub').innerHTML = `pregão de ${dataBR(D.radar.ultimo_pregao)}`;
+    const feitas = await processaPendentes().catch(() => []);
+    if (feitas.length) setTimeout(() => alerta('<b>Ordens agendadas executadas na abertura:</b><br>' + feitas.join('<br>')), 400);
     let a = 'radar'; try { a = localStorage.getItem('radarb3.aba') || 'radar'; } catch (e) {}
     const h = location.hash.slice(1); abre(TELAS[h] ? h : (TELAS[a] ? a : 'radar'));
   } catch (e) { $('#tela').innerHTML = `<div class="vazio">Não foi possível carregar os dados (${e.message}). Verifique a internet.</div>`; }

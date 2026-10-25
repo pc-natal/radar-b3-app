@@ -15,6 +15,9 @@ for t, s in zip(tks, sym):
         ult = float(c.iloc[-1]); quando = c.index[-1]
         ant = diario[diario.index.date < quando.date()]
         out[t] = dict(preco=round(ult, 2), var=round(ult / float(ant.iloc[-1]) - 1, 4) if len(ant) else None, hora=str(quando))
+        op = dd[s]['Open'].dropna(); op = op[op.index.date == quando.date()]
+        if len(op) and float(op.iloc[-1]) > 0:
+            out[t]['abertura'] = round(float(op.iloc[-1]), 2); out[t]['dia'] = str(quando.date())
     except Exception:
         pass
 json.dump(dict(atualizado=dt.datetime.now(dt.timezone(dt.timedelta(hours=-3))).isoformat(timespec='minutes'), precos=out),
