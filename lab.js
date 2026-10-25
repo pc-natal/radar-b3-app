@@ -244,8 +244,13 @@ function renderRes(el, D_, r, a, b, nota) {
     ${kpi('Acerto', ops.length ? pctP(gan.length / ops.length, 0) : '–', 'ganho médio ' + pctP(media(gan)) + ' · perda média ' + pctP(media(per)))}</div>
     <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Estratégia</span><span><i style="background:${css('--linha-i')}"></i>Comprar e segurar</span><span><i style="background:${css('--linha-c')}"></i>CDI</span></div>
     <div class="graf" id="m-graf"></div>${nota ? `<p class="muted">${nota}</p>` : ''}</section>
+  <section class="cartao"><h3>Rendimento por período</h3>
+    <div class="seg" id="p-per"><button data-p="ano" aria-pressed="true">Por ano</button><button data-p="mes" aria-pressed="false">Por mês</button></div>
+    <div id="p-tab" class="rolagem" style="max-height:460px"><div class="vazio">calculando…</div></div>
+    <p class="muted">C&amp;S = comprar e segurar o próprio papel. IBOV sem dividendos. 🏆 = a estratégia ganhou do IBOV e do CDI. O primeiro e o último período podem ser parciais.</p></section>
   <section class="cartao"><h3>Operações</h3><div class="rolagem" style="max-height:420px"><table><tr><th>Entrada</th><th>Saída</th><th>Dias</th><th>Resultado</th></tr>
     ${ops.slice().reverse().map(o => `<tr><td>${dataBR(o.e)}</td><td>${o.x ? dataBR(o.x) : 'aberta'}</td><td>${o.dias}</td><td class="${corv(o.r)}">${pctP(o.r)}</td></tr>`).join('')}</table></div></section>`;
+  tabelaPeriodos(datas, eq, bh, cd);
   limpaGraficos();
   const g = grafico($('#m-graf'), 260, true);
   const s1 = g.addLineSeries({color: css('--linha-m'), lineWidth: 3, priceLineVisible: false, lastValueVisible: false}); s1.setData(datas.map((t, i) => ({time: t, value: eq[i]})));
@@ -367,4 +372,23 @@ async function labCarteira() {
     g.timeScale().fitContent();
   };
   $('#k-teta').onchange = desenha; $('#k-vag').onchange = desenha; desenha();
+}
+
+/* rendimento por ano ou por mês: estratégia × comprar e segurar × IBOV × CDI */
+async function tabelaPeriodos(datas, eq, bh, cd) {
+  let ib = null; try { const I = await labCarrega('^BVSP'); const m = new Map(I.d.map((d, i) => [d, I.c[i]])); let u = null; ib = datas.map(d => (u = m.get(d) ?? u)); } catch (e) {}
+  const desenha = modo => {
+    const el = $('#p-tab'); if (!el) return;
+    const chave = d => modo === 'ano' ? d.slice(0, 4) : d.slice(0, 7), fim = new Map(); datas.forEach((d, i) => fim.set(chave(d), i));
+    let ant = 0; const lin = []; let gI = 0, n = 0;
+    for (const [k, i] of fim) { if (i === 0) continue;   // o 1º ponto é só a base (véspera do início)
+      const r = arr => arr && arr[ant] ? arr[i] / arr[ant] - 1 : null;
+      const e = r(eq), b = r(bh), x = r(ib), c = r(cd); n++; if (x != null && e > x && e > c) gI++;
+      const rot = modo === 'ano' ? k : ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+k.slice(5) - 1] + '/' + k.slice(2, 4);
+      lin.push(`<tr><td><b>${rot}</b></td><td class="${corv(e)}">${pctP(e)}</td><td class="${corv(b)}">${pctP(b)}</td><td class="${corv(x)}">${pctP(x)}</td><td>${pctP(c)}</td><td>${x != null && e > x && e > c ? '🏆' : ''}</td></tr>`); ant = i; }
+    el.innerHTML = `<p class="muted">A estratégia ganhou do IBOV e do CDI em <b>${gI} de ${n}</b> ${modo === 'ano' ? 'anos' : 'meses'}.</p>
+      <table><tr><th>${modo === 'ano' ? 'Ano' : 'Mês'}</th><th>Estratégia</th><th>C&amp;S</th><th>IBOV</th><th>CDI</th><th></th></tr>${lin.reverse().join('')}</table>`;
+  };
+  document.querySelectorAll('#p-per button').forEach(bt => bt.onclick = () => { document.querySelectorAll('#p-per button').forEach(x => x.setAttribute('aria-pressed', x === bt)); desenha(bt.dataset.p); });
+  desenha('ano');
 }
