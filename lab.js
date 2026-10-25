@@ -384,6 +384,8 @@ const mom126 = (D_, i) => i >= 126 ? D_.c[i] / D_.c[i - 126] - 1 : -9;
 
 async function labCarteira() {
   const corpo = $('#l-corpo');
+  if (!LAB.familias) { try { LAB.familias = (await (await fetch('data/familias/indice.json')).json()).familias; } catch (e) { LAB.familias = []; } }
+  const grupos = GRUPOS.concat(LAB.familias.map(f => ['fam:' + f.nome, 'Só ' + f.nome + ' (parâmetros e stop dinâmicos)']));
   const sel = (id, lista, v) => `<select id="${id}">${opt(lista, v)}</select>`;
   corpo.innerHTML = `<section class="cartao"><h3>Carteira: o app escolhe as ações</h3>
     <p class="muted">Simula uma carteira com as 37 ações do estudo: a cada dia o método escolhe até N ações para ter, compra e vende sozinho. Período, capital e CDI vêm dos campos lá em cima (o campo Papel não é usado aqui).</p>
@@ -395,7 +397,8 @@ async function labCarteira() {
   const opcoes = () => {
     $('#c-opc').innerHTML = CART.modo === 'din' ? `
       <p class="muted">Toda semana, olhando só o passado, as variantes do método escolhem os melhores indicadores <b>de cada ação</b>; a carteira compra as ações em que pelo menos o limiar das variantes concorda.</p>
-      <label>Entre quais estratégias escolher${sel('c-gru', GRUPOS, CART.grupo)}</label>
+      <label>Entre quais estratégias escolher${sel('c-gru', grupos, CART.grupo)}</label>
+      <p class="muted" style="margin-top:-6px">Escolha "Só …" para fixar o indicador: o método varia os parâmetros e o stop dele ao longo do tempo e escolhe as ações da carteira.</p>
       <div class="lin"><label>Olhar para trás${sel('c-jan', JANELAS, CART.janela)}</label><label>Comitê${sel('c-com', COMITES_C, CART.comite)}</label></div>
       <label>Limiar de consenso${sel('c-teta', [0.34, 0.5, 0.6, 0.7, 0.8, 0.9, 1].map(v => [v, v === 1 ? 'todas concordam (100%)' : Math.round(v * 100) + '%' + (v === 0.7 ? ' (atual)' : '')]), CART.teta)}</label>`
       : `<p class="muted">A mesma estratégia em todas as ações; quando várias dão sinal ao mesmo tempo, entram as que mais subiram nos últimos 6 meses.</p>
@@ -418,12 +421,15 @@ async function rodaCarteira() {
   const el = $('#c-res2'); el.innerHTML = '<section class="cartao"><div class="vazio">Carregando as 37 ações… <b id="c-pr">0%</b><br><span class="muted">(só na primeira vez; ~4 MB)</span></div></section>';
   const P = await carregaEstudo(f => { const x = $('#c-pr'); if (x) x.textContent = Math.round(f * 100) + '%'; });
   let cel = null;
-  if (CART.modo === 'din') { try { cel = LAB.celulas || (LAB.celulas = await (await fetch('data/consenso_celulas.json')).json()); } catch (e) { el.innerHTML = '<section class="cartao"><div class="vazio">Dados do método ainda não disponíveis. Tente depois da próxima atualização diária.</div></section>'; return; } }
+  const fam = CART.grupo.startsWith('fam:') ? CART.grupo.slice(4) : null;
+  if (CART.modo === 'din') { try { LAB.celFam = LAB.celFam || {};
+      cel = fam ? (LAB.celFam[fam] || (LAB.celFam[fam] = await (await fetch('data/familias/' + LAB.familias.find(f => f.nome === fam).arquivo)).json()))
+                : (LAB.celulas || (LAB.celulas = await (await fetch('data/consenso_celulas.json')).json())); } catch (e) { el.innerHTML = '<section class="cartao"><div class="vazio">Dados do método ainda não disponíveis. Tente depois da próxima atualização diária.</div></section>'; return; } }
   el.innerHTML = '<section class="cartao"><div class="vazio">Simulando…</div></section>'; await new Promise(r => setTimeout(r, 30));
   const cal = cel ? cel.datas : [...new Set(Object.values(P).flatMap(x => x.d.filter(d => d >= '2006-01-02')))].sort();
   let S = [];
   if (cel) {
-    const usa = cel.celulas.map((c, k) => (CART.grupo === '*' || c.estrategias === CART.grupo) && (CART.janela === '*' || String(c.janela) === String(CART.janela)) && (CART.comite === '*' || c.comite === CART.comite) ? k : -1).filter(k => k >= 0);
+    const usa = cel.celulas.map((c, k) => (CART.grupo === '*' || fam || c.estrategias === CART.grupo) && (CART.janela === '*' || String(c.janela) === String(CART.janela)) && (CART.comite === '*' || c.comite === CART.comite) ? k : -1).filter(k => k >= 0);
     const nVar = usa.length * cel.por_celula, posCal = new Map(cal.map((d, i) => [d, i]));
     for (const [tk, linhas] of Object.entries(cel.papeis)) { const D_ = P[tk]; if (!D_) continue;
       const frac = t => { let s = 0; for (const k of usa) { const ch = linhas[k].charCodeAt(t); if (ch === 46) return -1; s += ch - 48; } return s / nVar; };
@@ -451,7 +457,7 @@ async function rodaCarteira() {
   const dd = arr => { let pk = 0, m = 0; for (const x of arr) { pk = Math.max(pk, x); m = Math.min(m, x / pk - 1); } return m; };
   const ops = res.ops.filter(o => o.x >= datas[0] && o.e <= datas.at(-1)), gan = ops.filter(o => o.r > 0);
   const kpi = (r, v, x, cls) => `<div class="kpi"><div class="r">${r}</div><div class="v ${cls || ''}">${v}</div><div class="muted">${x}</div></div>`;
-  const nomeCfg = CART.modo === 'din' ? `${GRUPOS.find(g => g[0] === CART.grupo)[1]} · ${JANELAS.find(j => String(j[0]) === String(CART.janela))[1]} · ${COMITES_C.find(c => c[0] === CART.comite)[1]} · limiar ${Math.round(CART.teta * 100)}%` : `${CART.est} + stop ${CART.stop} (parâmetros fixos)`;
+  const nomeCfg = CART.modo === 'din' ? `${fam ? 'Só ' + fam + ' (dinâmico)' : GRUPOS.find(g => g[0] === CART.grupo)[1]} · ${JANELAS.find(j => String(j[0]) === String(CART.janela))[1]} · ${COMITES_C.find(c => c[0] === CART.comite)[1]} · limiar ${Math.round(CART.teta * 100)}%` : `${CART.est} + stop ${CART.stop} (parâmetros fixos)`;
   el.innerHTML = `<section class="cartao"><h3>${dataBR(datas[0])} a ${dataBR(datas.at(-1))}</h3><p class="muted">${nomeCfg} · até ${CART.vagas} ações</p><div class="kpis">
     ${kpi(brl(cap) + ' viraram', brl(eq.at(-1)), pctP(aa(eq)) + ' ao ano', eq.at(-1) > ib.at(-1) ? 'pos' : 'neg')}${kpi('Ibovespa', brl(ib.at(-1)), pctP(aa(ib)) + ' ao ano')}
     ${kpi('CDI', brl(cd.at(-1)), pctP(aa(cd)) + ' ao ano')}${cmp ? kpi(CART.cmp + ' (comprar e segurar)', brl(cmp.at(-1)), pctP(aa(cmp)) + ' ao ano') : ''}
