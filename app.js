@@ -201,12 +201,20 @@ function dlgOrdem(tipo, tk) {
 }
 
 /* ---------------- MERCADO ---------------- */
+function semAcento(x) { return (x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase(); }
 function telaMercado(filtro = '') {
-  const f = filtro.toUpperCase();
-  const lst = D.universo.filter(u => !f || u.papel.includes(f) || (u.nome || '').toUpperCase().includes(f));
-  $('#tela').innerHTML = `<section class="cartao"><input id="busca" placeholder="Buscar ação (ex.: PETR4, Vale)" value="${filtro}">
-    <div class="lista">${lst.map(u => { const px = preco(u.papel), v = variacao(u.papel); const sinal = D.radar.ordens.comprar.includes(u.papel) ? '🟢' : D.radar.ordens.vender.includes(u.papel) ? '🔴' : D.radar.ordens.manter.includes(u.papel) ? '🔵' : '';
-      return `<div class="item" data-tk="${u.papel}"><span class="tk">${nomeTk(u.papel)} ${sinal}</span><span class="nm">${u.nome}${u.extra ? ' · fora do estudo' : ''}</span><span class="pr">${brl(px && px.preco)}<br><span class="${v >= 0 ? 'pos' : 'neg'}">${pct(v, 2)}</span></span></div>`; }).join('')}</div>
+  const f = semAcento(filtro.trim()), LIM = 60;
+  const casa = u => !f || u.papel.includes(f) || semAcento(u.nome).includes(f);
+  const estudo = D.universo.filter(u => !u.extra && casa(u)), outros = D.universo.filter(u => u.extra && casa(u));
+  const item = u => { const px = preco(u.papel), v = variacao(u.papel); const sinal = D.radar.ordens.comprar.includes(u.papel) ? '🟢' : D.radar.ordens.vender.includes(u.papel) ? '🔴' : D.radar.ordens.manter.includes(u.papel) ? '🔵' : '';
+    return `<div class="item" data-tk="${u.papel}"><span class="tk">${nomeTk(u.papel)} ${sinal}</span><span class="nm">${u.nome}${u.iliquida ? ' · <b class="neg">baixa liquidez</b>' : ''}</span><span class="pr">${brl(px && px.preco)}<br><span class="${v >= 0 ? 'pos' : 'neg'}">${pct(v, 2)}</span></span></div>`; };
+  const nTot = D.universo.filter(u => u.extra).length;
+  $('#tela').innerHTML = `<section class="cartao"><input id="busca" type="search" autocomplete="off" placeholder="Buscar qualquer ação da B3 (código ou nome)" value="${filtro}">
+    <p class="muted">${D.universo.length} papéis: ${D.universo.length - nTot} acompanhados pelo método + ${nTot} demais ações da B3.</p></section>
+    ${estudo.length ? `<section class="cartao"><h3>Acompanhadas pelo método (${estudo.length})</h3><div class="lista">${estudo.map(item).join('')}</div></section>` : ''}
+    <section class="cartao"><h3>Demais ações da B3${f ? ` (${outros.length})` : ''}</h3>
+    ${f ? `<div class="lista">${outros.slice(0, LIM).map(item).join('') || '<div class="vazio">Nenhuma ação encontrada.</div>'}</div>${outros.length > LIM ? `<p class="muted">Mostrando ${LIM} de ${outros.length}. Digite mais letras para refinar.</p>` : ''}`
+        : `<p class="muted">Digite o código (ex.: <b>MGLU3</b>) ou parte do nome (ex.: <b>Magazine</b>) para encontrar qualquer uma das ${nTot} ações. Elas têm gráfico, IFR, HiLo, compra simulada e o Lab completo, mas não entram no radar diário do método.</p>`}
     <p class="muted">${D.cot ? 'Cotações de ' + horaBR(D.cot.atualizado) + ' (atraso ~15 min).' : 'Mostrando o último fechamento.'} 🟢 compra · 🔴 venda · 🔵 mantido pelo método.</p></section>`;
   const b = $('#busca'); b.oninput = () => { const pos = b.selectionStart; telaMercado(b.value); const n = $('#busca'); n.focus(); n.setSelectionRange(pos, pos); };
   document.querySelectorAll('.item[data-tk]').forEach(e => e.onclick = () => telaPapel(e.dataset.tk));
@@ -234,8 +242,12 @@ async function telaPapel(tk) {
     <div class="legenda"><span><i style="background:${css('--compra')}"></i>HiLo de alta</span><span><i style="background:${css('--venda')}"></i>HiLo de baixa</span></div>
     <div class="graf" id="g-p"></div><h3>IFR (14)</h3><div class="graf p" id="g-i"></div>
     ${tk !== '^BVSP' ? '<div class="lin"><button class="btn c" id="pc">Comprar</button><button class="btn v" id="pv">Vender</button></div>' : ''}
+    ${(D.universo.find(u => u.papel === tk) || {}).iliquida ? '<p class="muted" style="color:var(--venda)">Ação de baixa liquidez: negocia pouco e há dias sem negócio. Preços, gráficos e testes são pouco confiáveis, e comprar ou vender pode ser difícil na prática.</p>' : ''}
+    ${(D.universo.find(u => u.papel === tk) || {}).extra ? '<p class="muted">Fora do radar diário do método (que acompanha ' + D.universo.filter(u => !u.extra).length + ' papéis). Para testar indicadores, stops e o método dinâmico neste papel, use o Lab.</p>' : ''}
+    <button class="btn" id="plab">Analisar ${nomeTk(tk)} no Lab (indicadores, stops, método dinâmico)</button>
     <button class="btn sec" id="pq">Perguntar ao Claude sobre ${nomeTk(tk)}</button></section>`;
   $('#volta').onclick = () => abre('mercado');
+  $('#plab').onclick = () => { LAB.tk = tk; LAB.rank = null; abre('lab'); };
   const desenha = m => {
     limpaGraficos(); const i0 = Math.max(0, H.d.length - Math.round(m * 21));
     const g = grafico($('#g-p')), cs = g.addCandlestickSeries({upColor: css('--compra'), downColor: css('--venda'), borderVisible: false, wickUpColor: css('--compra'), wickDownColor: css('--venda')});
@@ -322,10 +334,17 @@ function telaAjustes() {
 
 function telaMais() {
   $('#tela').innerHTML = `<section class="cartao"><h2>Mais</h2><div class="lista">
+    <div class="item" data-t="tutorial"><span class="tk" style="min-width:130px">▶ Tutorial em vídeo</span><span class="nm" style="white-space:normal">Como usar o app, passo a passo (9 min, narrado e legendado)</span></div>
     <div class="item" data-t="estudo"><span class="tk" style="min-width:130px">Estudo completo</span><span class="nm" style="white-space:normal">Dashboard do estudo: 972 carteiras, ranking no tempo, método dinâmico papel a papel</span></div>
     <div class="item" data-t="desempenho"><span class="tk" style="min-width:130px">Desempenho</span><span class="nm" style="white-space:normal">Placar ao vivo do método e da minha carteira simulada × IBOV</span></div>
     <div class="item" data-t="ajustes"><span class="tk" style="min-width:130px">Ajustes</span><span class="nm" style="white-space:normal">Notificações, capital, backup da carteira</span></div></div></section>`;
   document.querySelectorAll('.item[data-t]').forEach(e => e.onclick = () => abre(e.dataset.t));
+}
+function telaTutorial() {
+  $('#tela').innerHTML = `<section class="cartao" style="padding:8px"><button class="btn sec" id="volta">← Mais</button>
+    <video src="tutorial.mp4" controls playsinline preload="metadata" style="width:100%;max-height:calc(100vh - 200px);border-radius:8px;background:#000"></video>
+    <p class="muted">Dica: use o Wi-Fi (6 MB). O vídeo mostra cada tela do app com o item explicado em destaque.</p></section>`;
+  $('#volta').onclick = () => abre('mais');
 }
 async function telaEstudo() {
   let existe = false; try { existe = (await fetch('estudo/index.html', {method: 'HEAD'})).ok; } catch (e) {}
@@ -336,7 +355,7 @@ async function telaEstudo() {
     <iframe src="estudo/index.html" title="Estudo completo" style="width:100%;height:calc(100vh - 230px);min-height:420px;border:0;border-radius:8px"></iframe></section>`;
   $('#volta').onclick = () => abre('mais');
 }
-const TELAS = {radar: telaRadar, carteira: telaCarteira, mercado: () => telaMercado(), lab: () => telaLab(), mais: telaMais, estudo: telaEstudo, desempenho: telaDesempenho, ajustes: telaAjustes};
+const TELAS = {radar: telaRadar, carteira: telaCarteira, mercado: () => telaMercado(), lab: () => telaLab(), mais: telaMais, estudo: telaEstudo, tutorial: telaTutorial, desempenho: telaDesempenho, ajustes: telaAjustes};
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => abre(b.dataset.t));
 
 (async () => {

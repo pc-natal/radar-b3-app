@@ -92,7 +92,8 @@ async function telaLab() {
   $('#tela').innerHTML = `
   <section class="cartao"><h2>Laboratório de estratégias</h2>
     <p class="muted">Teste qualquer indicador (ou 2 a 3 combinados), com ou sem stop, em qualquer período. Sinal no fechamento, ordem na abertura do dia seguinte, custo de 0,07% por ordem.</p>
-    <label>Papel<select id="l-tk">${opt(papeis, LAB.tk)}</select></label>
+    <label>Papel<input id="l-tk" list="l-tks" type="search" autocomplete="off" value="${LAB.tk === '^BVSP' ? 'IBOV' : LAB.tk}" placeholder="Código ou nome (ex.: PETR4, Vale)"><datalist id="l-tks">${papeis.map(([v, r]) => `<option value="${v === '^BVSP' ? 'IBOV' : v}">${r}</option>`).join('')}</datalist></label>
+    <p class="muted" style="margin-top:-4px">${dados_.nome || ''}</p>
     ${dados_.d.length < 1500 ? `<p class="muted" style="color:var(--venda)">Histórico curto: ${dados_.d.length} pregões (desde ${dataBR(dados_.d[0])}). Resultados valem pouco estatisticamente, e o método dinâmico precisa de cerca de 6 anos de dados.</p>` : ''}
     <div class="lin"><label>Início<input id="l-ini" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.ini}"></label>
     <label>Fim<input id="l-fim" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.fim}"></label></div>
@@ -100,7 +101,12 @@ async function telaLab() {
     <label>Dinheiro parado<select id="l-cdi"><option value="1" ${LAB.cdi ? 'selected' : ''}>rende CDI</option><option value="0" ${!LAB.cdi ? 'selected' : ''}>sem rendimento</option></select></label></div>
     <div class="seg" id="l-sub"><button data-s="ranking" aria-pressed="${LAB.sub === 'ranking'}">Ranking</button><button data-s="montar" aria-pressed="${LAB.sub === 'montar'}">Montar</button><button data-s="dinamico" aria-pressed="${LAB.sub === 'dinamico'}">Dinâmico</button><button data-s="comparar" aria-pressed="${LAB.sub === 'comparar'}">Comparar</button></div>
   </section><div id="l-corpo"></div>`;
-  $('#l-tk').onchange = e => { LAB.tk = e.target.value; LAB.rank = null; telaLab(); };
+  $('#l-tk').onchange = e => {
+    const q = semAcento(e.target.value.trim()), v = q === 'IBOV' ? '^BVSP' : q;
+    const u = D.universo.find(x => x.papel === v) || D.universo.find(x => semAcento(x.nome).includes(q) || x.papel.startsWith(q));
+    if (!u) { alerta('Papel não encontrado: ' + e.target.value); return; }
+    LAB.tk = u.papel; LAB.rank = null; telaLab(); };
+  $('#l-tk').onfocus = e => e.target.select();
   $('#l-ini').onchange = e => { LAB.ini = e.target.value; subLab(); };
   $('#l-fim').onchange = e => { LAB.fim = e.target.value; subLab(); };
   $('#l-cap').onchange = e => { LAB.capital = +e.target.value || 5000; subLab(); };
