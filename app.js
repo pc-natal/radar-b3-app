@@ -167,6 +167,7 @@ function telaRadar() {
     <div class="graf" id="g-curva"></div>
     <p class="muted">Simulação histórica (backtest). Resultado passado não garante resultado futuro.</p>
   </section>
+  ${tabelaAnos(R.curva)}
   ${cuidados}`;
   const desenha = anos => {
     limpaGraficos(); const C = R.curva; let i0 = 0;
@@ -226,6 +227,23 @@ function acaoMinha(tipo, t) {
                          : ordem('C', t, {valor: patrimonioEst() / R.vagas}, 'radar');
   telaRadar();
   if (r) alerta(r + (aberta ? ' (simulado).' : '.<br><br>' + NOTA_AGENDA));
+}
+/* máquina do tempo: rendimento de cada ano do método × IBOV × CDI */
+function tabelaAnos(C) {
+  if (!C || !C.datas) return '';
+  const fim = {}; C.datas.forEach((d, i) => { fim[d.slice(0, 4)] = i; });
+  const anos = Object.keys(fim).sort(); let ant = 0; const lin = [];
+  let gI = 0, gC = 0;
+  for (const a of anos) { const k = fim[a], r = x => C[x] && C[x][ant] ? C[x][k] / C[x][ant] - 1 : null;
+    const m = r('metodo'), i = r('ibov'), c = r('cdi'); if (m > i) gI++; if (m > c) gC++;
+    lin.push(`<tr><td><b>${a}${a === hojeBRT().slice(0, 4) ? '*' : ''}</b></td><td class="${m >= 0 ? 'pos' : 'neg'}">${pct(m)}</td><td class="${i >= 0 ? 'pos' : 'neg'}">${pct(i)}</td><td>${pct(c)}</td><td>${m > i && m > c ? '🏆' : ''}</td></tr>`); ant = k; }
+  const n = C.datas.length - 1, anosTot = (new Date(C.datas[n]) - new Date(C.datas[0])) / 31557600000, aa = x => pct(Math.pow(C[x][n] / C[x][0], 1 / anosTot) - 1);
+  return `<section class="cartao"><h2>Máquina do tempo: ano a ano</h2>
+    <p class="muted">Quanto o método teria rendido em cada ano, seguindo exatamente as regras de hoje (consenso de 70%, até 3 ações, custo de 0,07% por ordem, caixa no CDI). 🏆 = ganhou do IBOV e do CDI.</p>
+    <div class="kpis"><div class="kpi"><div class="r">Método</div><div class="v">${aa('metodo')}</div><div class="muted">ao ano</div></div><div class="kpi"><div class="r">IBOV</div><div class="v">${aa('ibov')}</div><div class="muted">ao ano</div></div>
+    <div class="kpi"><div class="r">CDI</div><div class="v">${aa('cdi')}</div><div class="muted">ao ano</div></div><div class="kpi"><div class="r">Anos melhores</div><div class="v">${gI} de ${anos.length}</div><div class="muted">que o IBOV · ${gC} que o CDI</div></div></div>
+    <table><tr><th>Ano</th><th>Método</th><th>IBOV</th><th>CDI</th><th></th></tr>${lin.reverse().join('')}</table>
+    <p class="muted">* ano em andamento. Atenção: 2019–2021 concentram boa parte do ganho, e desde 2022 o método rendeu menos que o CDI. As 37 ações do estudo são as grandes de hoje (viés de sobrevivência): o passado tende a parecer melhor do que teria sido.</p></section>`;
 }
 function copiaMetodo() {
   // compra, em partes iguais, as ações que o método terá no próximo pregão (manter + comprar)
