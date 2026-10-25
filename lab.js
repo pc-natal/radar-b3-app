@@ -98,7 +98,7 @@ async function telaLab() {
     <label>Fim<input id="l-fim" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.fim}"></label></div>
     <div class="lin"><label>Capital (R$)<input id="l-cap" type="number" inputmode="decimal" value="${LAB.capital}"></label>
     <label>Dinheiro parado<select id="l-cdi"><option value="1" ${LAB.cdi ? 'selected' : ''}>rende CDI</option><option value="0" ${!LAB.cdi ? 'selected' : ''}>sem rendimento</option></select></label></div>
-    <div class="seg" id="l-sub"><button data-s="ranking" aria-pressed="${LAB.sub === 'ranking'}">Ranking</button><button data-s="montar" aria-pressed="${LAB.sub === 'montar'}">Montar</button><button data-s="dinamico" aria-pressed="${LAB.sub === 'dinamico'}">Dinâmico</button><button data-s="comparar" aria-pressed="${LAB.sub === 'comparar'}">Comparar</button><button data-s="carteira" aria-pressed="${LAB.sub === 'carteira'}">Carteira</button></div>
+    <div class="seg" id="l-sub" style="flex-wrap:wrap"><button data-s="ranking" aria-pressed="${LAB.sub === 'ranking'}">Ranking</button><button data-s="montar" aria-pressed="${LAB.sub === 'montar'}">Montar</button><button data-s="dinamico" aria-pressed="${LAB.sub === 'dinamico'}">Dinâmico</button><button data-s="comparar" aria-pressed="${LAB.sub === 'comparar'}">Comparar</button><button data-s="carteira" aria-pressed="${LAB.sub === 'carteira'}">Carteira</button><button data-s="protecao" aria-pressed="${LAB.sub === 'protecao'}">Proteção</button></div>
   </section><div id="l-corpo"></div>`;
   $('#l-tk').onclick = () => escolhePapel(t => { if (!t) return; LAB.tk = t; LAB.rank = null; telaLab(); });
   $('#l-ini').onchange = e => { LAB.ini = e.target.value; subLab(); };
@@ -108,7 +108,7 @@ async function telaLab() {
   document.querySelectorAll('#l-sub button').forEach(b => b.onclick = () => { LAB.sub = b.dataset.s; document.querySelectorAll('#l-sub button').forEach(x => x.setAttribute('aria-pressed', x === b)); subLab(); });
   subLab();
 }
-function subLab() { limpaGraficos(); ({ranking: labRanking, montar: labMontar, dinamico: labDinamico, comparar: labComparar, carteira: labCarteira})[LAB.sub](); }
+function subLab() { limpaGraficos(); ({ranking: labRanking, montar: labMontar, dinamico: labDinamico, comparar: labComparar, carteira: labCarteira, protecao: labProtecao})[LAB.sub](); }
 
 /* ---- ranking ---- */
 function garanteWorker() { if (!LAB.worker) LAB.worker = new Worker('lab-worker.js'); return LAB.worker; }
@@ -514,4 +514,139 @@ async function tabelaPeriodos(datas, eq, bh, cd) {
   };
   document.querySelectorAll('#p-per button').forEach(bt => bt.onclick = () => { document.querySelectorAll('#p-per button').forEach(x => x.setAttribute('aria-pressed', x === bt)); desenha(bt.dataset.p); });
   desenha('ano');
+}
+
+/* ---- proteção: ficar no ativo, sair por um stop e voltar por uma regra de reentrada (igual a motor/stops_reentrada.py) ---- */
+const PROT = {s: 0, v: 0, rank: null, ordem: 'calmar'};
+function protRegras(D_) {
+  const C = D_.c, H = D_.h, L = D_.l, T = C.length, INF = 1e18;
+  const ma = (x, n) => { const o = new Float64Array(T).fill(NaN); let s = 0; for (let i = 0; i < T; i++) { s += x[i]; if (i >= n) s -= x[i - n]; if (i >= n - 1) o[i] = s / n; } return o; };
+  const rollMax = (x, n, sh) => { const o = new Float64Array(T).fill(NaN); for (let i = n - 1 + sh; i < T; i++) { let m = -Infinity; for (let k = i - sh - n + 1; k <= i - sh; k++) m = Math.max(m, x[k]); o[i] = m; } return o; };
+  const rollMin = (x, n, sh) => { const o = new Float64Array(T).fill(NaN); for (let i = n - 1 + sh; i < T; i++) { let m = Infinity; for (let k = i - sh - n + 1; k <= i - sh; k++) m = Math.min(m, x[k]); o[i] = m; } return o; };
+  const nan2 = (a, v) => a.map(x => Number.isNaN(x) ? v : x);
+  const S = [], V = [];
+  [0.05, 0.08, 0.10, 0.12, 0.15, 0.20, 0.25, 0.30].forEach(x => S.push([`Queda de ${Math.round(x * 100)}% do topo`, 0, x, null]));
+  [50, 100, 150, 200, 250].forEach(n => { const m = ma(C, n); [0, 0.02, 0.04].forEach(b => S.push([`Abaixo da média de ${n} dias` + (b ? ` (folga ${Math.round(b * 100)}%)` : ''), 2, 0, nan2(m.map(x => x * (1 - b)), -INF)])); });
+  [2, 3, 4, 5, 6].forEach(k => S.push([`Stop ATR: topo − ${k}×ATR(22)`, 1, k, null]));
+  [8, 13, 21, 34, 55].forEach(n => S.push([`Abaixo do HiLo de baixa (${n})`, 2, 0, nan2(ma(L, n), -INF)]));
+  [20, 50, 100].forEach(n => S.push([`Abaixo da mínima de ${n} dias`, 2, 0, nan2(rollMin(L, n, 1), -INF)]));
+  { // média de 10 meses checada no último pregão do mês
+    const fim = [], lim = new Float64Array(T).fill(-INF); for (let i = 0; i < T; i++) if (i === T - 1 || D_.d[i + 1].slice(0, 7) !== D_.d[i].slice(0, 7)) fim.push(i);
+    const mm = new Map(); fim.forEach((i, k) => { if (k >= 9) { let s = 0; for (let j = k - 9; j <= k; j++) s += C[fim[j]]; mm.set(i, s / 10); } });
+    let atual = NaN; for (let i = 0, k = 0; i < T; i++) { if (mm.has(i)) atual = mm.get(i); if (k < fim.length && fim[k] === i) { if (!Number.isNaN(atual)) lim[i] = atual; k++; } }
+    S.push(['Média de 10 meses (fim do mês)', 2, 0, lim]);
+  }
+  [20, 50, 100, 150, 200, 250].forEach(n => { const m = ma(C, n); [0, 0.02].forEach(b => V.push([`Acima da média de ${n} dias` + (b ? ` (folga ${Math.round(b * 100)}%)` : ''), 0, 0, nan2(m.map(x => x * (1 + b)), INF)])); });
+  [10, 20, 50, 100].forEach(n => V.push([`Nova máxima de ${n} dias`, 0, 0, nan2(rollMax(C, n, 1).map(x => x - 1e-12), INF)]));
+  [0.05, 0.10, 0.15, 0.20, 0.30].forEach(x => V.push([`Subir ${Math.round(x * 100)}% do fundo`, 1, x, null]));
+  [5, 10, 20, 40, 60, 120].forEach(d => V.push([`Esperar ${d} dias`, 2, d, null]));
+  const ifr = new Float64Array(T).fill(50); { let g = 0, p = 0; for (let i = 1; i < T; i++) { const dl = C[i] - C[i - 1]; g += (Math.max(dl, 0) - g) / 14; p += (Math.max(-dl, 0) - p) / 14; ifr[i] = p === 0 ? 50 : 100 - 100 / (1 + g / p); } }
+  V.push(['IFR(14) acima de 50', 0, 0, ifr.map(x => x > 50 ? -INF : INF)]); V.push(['IFR(14) acima de 60', 0, 0, ifr.map(x => x > 60 ? -INF : INF)]);
+  [[10, 30], [20, 50], [50, 200]].forEach(([a, b]) => { const ma1 = ma(C, a), ma2 = ma(C, b); V.push([`Média ${a} acima da média ${b}`, 0, 0, ma1.map((x, i) => x > ma2[i] ? -INF : INF)]); });
+  V.push(['Voltar ao preço de saída', 3, 0, null]);
+  [8, 13, 21, 34, 55].forEach(n => V.push([`Acima do HiLo de alta (${n})`, 0, 0, nan2(ma(H, n), INF)]));
+  const atr = new Float64Array(T); { let a = H[0] - L[0]; atr[0] = a; for (let i = 1; i < T; i++) { const tr = Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1])); a += (tr - a) / 22; atr[i] = a; } }
+  return {S, V, atr};
+}
+function protMaquina(D_, s, v, atr, custo) {
+  const o = D_.o, c = D_.c, cdi = D_.cdi, T = c.length, eq = new Float64Array(T).fill(1), pos = new Int8Array(T), ev = [];
+  let est = 1, topo = c[0], fundo = c[0], dias = 0, px = c[0], trocas = 0; pos[0] = 1;
+  for (let t = 1; t < T; t++) {
+    const ant = pos[t - 1]; let r;
+    if (est === ant) r = est ? c[t] / c[t - 1] : 1 + cdi[t]; else if (est) r = c[t] / o[t] * (1 - custo); else r = o[t] / c[t - 1] * (1 - custo);
+    eq[t] = eq[t - 1] * r; pos[t] = est;
+    if (est) { if (c[t] > topo) topo = c[t];
+      const sai = s[1] === 0 ? c[t] < topo * (1 - s[2]) : s[1] === 1 ? c[t] < topo - s[2] * atr[t] : c[t] < s[3][t];
+      if (sai) { est = 0; fundo = c[t]; dias = 0; px = c[t]; trocas++; ev.push({t: t + 1, tipo: 'saída'}); }
+    } else { dias++; if (c[t] < fundo) fundo = c[t];
+      const volta = v[1] === 0 ? c[t] > v[3][t] : v[1] === 1 ? c[t] >= fundo * (1 + v[2]) : v[1] === 2 ? dias >= v[2] : c[t] >= px;
+      if (volta) { est = 1; topo = c[t]; trocas++; ev.push({t: t + 1, tipo: 'volta'}); }
+    }
+  }
+  return {eq, pos, trocas, ev};
+}
+function protMetricas(D_, eq, pos, a, b) {
+  const anos = (new Date(D_.d[b]) - new Date(D_.d[a - 1])) / 31557600000, cap = 1;
+  let pk = 0, dd = 0; for (let t = a - 1; t <= b; t++) { pk = Math.max(pk, eq[t]); dd = Math.min(dd, eq[t] / pk - 1); }
+  let w = 0; for (let t = a; t <= b; t++) w += pos[t]; w /= (b - a + 1);
+  return {aa: Math.pow(eq[b] / eq[a - 1], 1 / anos) - 1, dd, w};
+}
+function protMistura(D_, w) {   // w fixo no ativo e o resto no CDI (rebalanceado todo dia)
+  const c = D_.c, T = c.length, eq = new Float64Array(T).fill(1); for (let t = 1; t < T; t++) eq[t] = eq[t - 1] * (1 + w * (c[t] / c[t - 1] - 1) + (1 - w) * D_.cdi[t]); return eq;
+}
+
+async function labProtecao() {
+  const D_ = await labCarrega(LAB.tk), corpo = $('#l-corpo'); const R = LAB.protR && LAB.protR.tk === LAB.tk + D_.d.length ? LAB.protR : (LAB.protR = {tk: LAB.tk + D_.d.length, ...protRegras(D_)});
+  corpo.innerHTML = `<section class="cartao"><h3>Proteção: sair na queda e voltar depois</h3>
+    <p class="muted">Fica comprado em <b>${nomeTk(LAB.tk)}</b>; quando a regra de saída dispara, vende e o dinheiro vai para o CDI; quando a regra de volta dispara, compra de novo. Sinal no fechamento, ordem na abertura seguinte, custo de 0,07% por ordem.</p>
+    <label>Regra de saída (stop)<select id="p-s">${R.S.map((s, i) => `<option value="${i}" ${i === PROT.s ? 'selected' : ''}>${s[0]}</option>`).join('')}</select></label>
+    <label>Regra de volta (reentrada)<select id="p-v">${R.V.map((v, i) => `<option value="${i}" ${i === PROT.v ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></label>
+    <button class="btn" id="p-rodar">Simular</button>
+    <button class="btn sec" id="p-todas">Testar todas as ${R.S.length * R.V.length} combinações neste papel e período</button>
+    <p class="muted">Comparação justa: além de "comprar e segurar", o app mostra uma <b>mistura fixa</b> com a mesma exposição média (ex.: se a regra ficou 40% do tempo na ação, a mistura fica sempre 40% na ação e 60% no CDI). Uma regra só ajuda de verdade se render mais <i>e</i> cair menos que essa mistura.</p></section>
+    <div id="p-res"></div>`;
+  $('#p-s').onchange = e => PROT.s = +e.target.value; $('#p-v').onchange = e => PROT.v = +e.target.value;
+  $('#p-rodar').onclick = () => protUma(D_, R); $('#p-todas').onclick = () => protTodas(D_, R);
+  if (PROT.rank && PROT.rank.chave === LAB.tk + LAB.ini + LAB.fim) protTabela(D_, R); else protUma(D_, R);
+}
+function protUma(D_, R) {
+  const s = R.S[PROT.s], v = R.V[PROT.v], r = protMaquina(D_, s, v, R.atr, Motor.CUSTO);
+  let [a, b] = fatia(D_.d, LAB.ini, LAB.fim); b = Math.min(b, D_.d.length) - 1; a = Math.max(a, 1);
+  if (b - a < 40) { $('#p-res').innerHTML = '<section class="cartao"><div class="vazio">Escolha um período maior.</div></section>'; return; }
+  const m = protMetricas(D_, r.eq, r.pos, a, b), mix = protMistura(D_, m.w), cap = LAB.capital;
+  const bhArr = Array.from(D_.c), cdiEq = new Float64Array(D_.c.length).fill(1); for (let t = 1; t < cdiEq.length; t++) cdiEq[t] = cdiEq[t - 1] * (1 + D_.cdi[t]);
+  const mb = protMetricas(D_, bhArr, new Int8Array(bhArr.length).fill(1), a, b), mm = protMetricas(D_, mix, new Int8Array(bhArr.length).fill(1), a, b), mc = protMetricas(D_, cdiEq, new Int8Array(bhArr.length), a, b);
+  const datas = D_.d.slice(a - 1, b + 1), ser = arr => datas.map((d, i) => arr[a - 1 + i] / arr[a - 1] * cap);
+  const E = ser(r.eq), B = ser(bhArr), M = ser(mix), Cc = ser(cdiEq);
+  const kpi = (rot, v, x, cls) => `<div class="kpi"><div class="r">${rot}</div><div class="v ${cls || ''}">${v}</div><div class="muted">${x}</div></div>`;
+  const ok = m.aa > mm.aa && m.dd > mm.dd;
+  const ev = r.ev.filter(e => e.t >= a && e.t <= b);
+  $('#p-res').innerHTML = `<section class="cartao"><h3>${dataBR(datas[0])} a ${dataBR(datas.at(-1))}</h3><p class="muted">${R.S[PROT.s][0]} → volta: ${R.V[PROT.v][0]}</p>
+    <div class="ordem ${ok ? 'c-c' : 'c-v'}" style="margin:6px 0"><div><div class="tag">${ok ? 'Ajudou de verdade' : 'Não ajudou de verdade'}</div><div class="nm">${ok ? 'Rendeu mais e caiu menos que a mistura fixa de mesma exposição.' : 'Uma mistura fixa ação + CDI, sem mexer, teria feito igual ou melhor em retorno ou em queda.'}</div></div></div>
+    <div class="kpis">${kpi('Com a regra', brl(E.at(-1)), pctP(m.aa) + ' ao ano · queda ' + pctP(m.dd), m.aa >= mb.aa ? 'pos' : '')}
+      ${kpi('Comprar e segurar', brl(B.at(-1)), pctP(mb.aa) + ' ao ano · queda ' + pctP(mb.dd))}
+      ${kpi('Mistura fixa ' + Math.round(m.w * 100) + '% ação', brl(M.at(-1)), pctP(mm.aa) + ' ao ano · queda ' + pctP(mm.dd))}
+      ${kpi('CDI', brl(Cc.at(-1)), pctP(mc.aa) + ' ao ano')}
+      ${kpi('Tempo comprado', pctP(m.w, 0), (ev.length / Math.max(1, (new Date(datas.at(-1)) - new Date(datas[0])) / 31557600000)).toFixed(1).replace('.', ',') + ' trocas por ano')}</div>
+    <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Com a regra</span><span><i style="background:${css('--linha-i')}"></i>Comprar e segurar</span><span><i style="background:${css('--compra')}"></i>Mistura fixa</span><span><i style="background:${css('--linha-c')}"></i>CDI</span></div>
+    <div class="graf" id="p-graf"></div>
+    <h3>Queda desde o topo</h3><div class="graf p" id="p-dd"></div></section>
+    <section class="cartao"><h3>Rendimento por período</h3><div class="seg" id="pp-per"><button data-p="ano" aria-pressed="true">Por ano</button><button data-p="mes" aria-pressed="false">Por mês</button></div><div id="pp-tab" class="rolagem" style="max-height:460px"></div></section>
+    <section class="cartao"><h3>Saídas e voltas (${ev.length})</h3><div class="rolagem" style="max-height:360px"><table><tr><th>Data</th><th>O quê</th><th>Preço (abertura)</th></tr>
+      ${ev.slice().reverse().map(e => e.t < D_.d.length ? `<tr><td>${dataBR(D_.d[e.t])}</td><td class="${e.tipo === 'saída' ? 'neg' : 'pos'}">${e.tipo === 'saída' ? 'Saiu (foi para o CDI)' : 'Voltou a comprar'}</td><td>${brl(D_.o[e.t])}</td></tr>` : `<tr><td>próximo pregão</td><td class="${e.tipo === 'saída' ? 'neg' : 'pos'}">${e.tipo === 'saída' ? 'SAIR' : 'VOLTAR'}</td><td>–</td></tr>`).join('')}</table></div></section>`;
+  limpaGraficos(); const g = grafico($('#p-graf'), 260, true), ln = (gr, arr, cor, w) => gr.addLineSeries({color: cor, lineWidth: w, priceLineVisible: false, lastValueVisible: false}).setData(datas.map((d, i) => ({time: d, value: arr[i]})));
+  ln(g, E, css('--linha-m'), 3); ln(g, B, css('--linha-i'), 2); ln(g, M, css('--compra'), 2); ln(g, Cc, css('--linha-c'), 1); g.timeScale().fitContent();
+  const dd = arr => { let pk = 0; return arr.map(x => { pk = Math.max(pk, x); return (x / pk - 1) * 100; }); };
+  const g2 = grafico($('#p-dd'), 150, false); ln(g2, dd(B), css('--linha-i'), 1); ln(g2, dd(E), css('--linha-m'), 2); g2.timeScale().fitContent();
+  const cols = [['Regra', E], ['C&S', B], ['Mistura', M], ['CDI', Cc]];
+  const tab = modo => { const chave = d => modo === 'ano' ? d.slice(0, 4) : d.slice(0, 7), fim = new Map(); datas.forEach((d, i) => fim.set(chave(d), i)); let ant = 0; const lin = [];
+    for (const [k, i] of fim) { if (i === 0) continue; const rs = cols.map(c => c[1][i] / c[1][ant] - 1);
+      const rot = modo === 'ano' ? k : ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+k.slice(5) - 1] + '/' + k.slice(2, 4);
+      lin.push(`<tr><td><b>${rot}</b></td>${rs.map(x => `<td class="${corv(x)}">${pctP(x)}</td>`).join('')}</tr>`); ant = i; }
+    $('#pp-tab').innerHTML = `<table><tr><th>${modo === 'ano' ? 'Ano' : 'Mês'}</th>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr>${lin.reverse().join('')}</table>`; };
+  document.querySelectorAll('#pp-per button').forEach(bt => bt.onclick = () => { document.querySelectorAll('#pp-per button').forEach(x => x.setAttribute('aria-pressed', x === bt)); tab(bt.dataset.p); });
+  tab('ano');
+}
+async function protTodas(D_, R) {
+  const el = $('#p-res'); el.innerHTML = '<section class="cartao"><div class="vazio">Testando as combinações… <b id="p-pr">0%</b></div></section>';
+  let [a, b] = fatia(D_.d, LAB.ini, LAB.fim); b = Math.min(b, D_.d.length) - 1; a = Math.max(a, 1);
+  const bh = Array.from(D_.c), mb = protMetricas(D_, bh, new Int8Array(bh.length).fill(1), a, b), lin = [];
+  for (let i = 0; i < R.S.length; i++) {
+    for (let j = 0; j < R.V.length; j++) { const r = protMaquina(D_, R.S[i], R.V[j], R.atr, Motor.CUSTO), m = protMetricas(D_, r.eq, r.pos, a, b), mm = protMetricas(D_, protMistura(D_, m.w), new Int8Array(bh.length).fill(1), a, b);
+      lin.push({i, j, ...m, aaM: mm.aa, ddM: mm.dd, ok: m.aa > mm.aa && m.dd > mm.dd}); }
+    if (i % 4 === 3) { $('#p-pr').textContent = Math.round(i / R.S.length * 100) + '%'; await new Promise(r => setTimeout(r, 0)); }
+  }
+  PROT.rank = {chave: LAB.tk + LAB.ini + LAB.fim, lin, mb}; protTabela(D_, R);
+}
+function protTabela(D_, R) {
+  const {lin, mb} = PROT.rank, ord = {calmar: x => x.aa / Math.max(0.01, -x.dd), aa: x => x.aa, dd: x => x.dd, ganho: x => (x.aa - x.aaM) + (x.dd - x.ddM)}[PROT.ordem];
+  const L = lin.slice().sort((p, q) => ord(q) - ord(p)), nOk = lin.filter(x => x.ok).length;
+  $('#p-res').innerHTML = `<section class="cartao"><h3>${lin.length} combinações em ${nomeTk(LAB.tk)}</h3>
+    <p class="muted">Comprar e segurar: ${pctP(mb.aa)} ao ano, pior queda ${pctP(mb.dd)}. Só <b>${nOk}</b> combinações (${pctP(nOk / lin.length, 0)}) renderam mais <i>e</i> caíram menos que a mistura fixa de mesma exposição (✅).</p>
+    <label>Ordenar por<select id="p-ord">${opt([['calmar', 'Retorno ÷ pior queda'], ['aa', 'Maior retorno'], ['dd', 'Menor queda'], ['ganho', 'Vantagem sobre a mistura fixa']], PROT.ordem)}</select></label>
+    <div class="rolagem" style="max-height:520px"><table><tr><th>#</th><th>Sair / Voltar</th><th>Ao ano</th><th>Queda</th><th>Tempo</th><th></th></tr>
+    ${L.slice(0, 60).map((x, k) => `<tr data-i="${x.i}" data-j="${x.j}" style="cursor:pointer"><td>${k + 1}</td><td style="text-align:left;white-space:normal;font-size:12px">${R.S[x.i][0]}<br><span class="muted">volta: ${R.V[x.j][0]}</span></td><td class="${corv(x.aa)}">${pctP(x.aa)}</td><td class="neg">${pctP(x.dd, 0)}</td><td>${pctP(x.w, 0)}</td><td>${x.ok ? '✅' : ''}</td></tr>`).join('')}</table></div>
+    <p class="muted">Toque numa linha para ver o detalhe. Cuidado: a campeã de um período costuma piorar no seguinte. No estudo (Ibovespa, 41 ativos, 2013–2026), só 13% das combinações ganharam da mistura fixa nas duas coisas.</p></section>`;
+  $('#p-ord').onchange = e => { PROT.ordem = e.target.value; protTabela(D_, R); };
+  document.querySelectorAll('#p-res tr[data-i]').forEach(tr => tr.onclick = () => { PROT.s = +tr.dataset.i; PROT.v = +tr.dataset.j; PROT.rank = null; labProtecao(); });
 }
