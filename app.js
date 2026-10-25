@@ -117,7 +117,7 @@ function alerta(msg) { const d = $('#dlg'); $('#dlg-c').innerHTML = `<p>${msg}</
 function limpaGraficos() { observadores.forEach(o => o.disconnect()); observadores = []; graficos.forEach(g => { try { g.remove(); } catch (e) {} }); graficos = []; }
 function grafico(el, alt, log) {
   const g = LightweightCharts.createChart(el, {height: alt || el.clientHeight || 240, layout: {background: {color: 'transparent'}, textColor: css('--tinta2'), fontFamily: 'IBM Plex Sans'},
-    grid: {vertLines: {visible: false}, horzLines: {color: css('--linha')}}, rightPriceScale: {borderVisible: false, mode: log ? 1 : 0}, timeScale: {borderVisible: false},
+    grid: {vertLines: {visible: false}, horzLines: {color: css('--linha')}}, rightPriceScale: {borderVisible: false, mode: log ? 1 : 0}, timeScale: {borderVisible: false, minBarSpacing: 0.01},
     crosshair: {mode: 0}, localization: {locale: 'pt-BR', priceFormatter: p => p.toLocaleString('pt-BR', {maximumFractionDigits: 2})}});
   const ob = new ResizeObserver(() => { try { g.applyOptions({width: el.clientWidth}); } catch (e) {} }); ob.observe(el); observadores.push(ob);
   graficos.push(g); return g;

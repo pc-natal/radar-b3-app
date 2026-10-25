@@ -99,7 +99,7 @@ async function telaLab() {
     <label>Fim<input id="l-fim" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.fim}"></label></div>
     <div class="lin"><label>Capital (R$)<input id="l-cap" type="number" inputmode="decimal" value="${LAB.capital}"></label>
     <label>Dinheiro parado<select id="l-cdi"><option value="1" ${LAB.cdi ? 'selected' : ''}>rende CDI</option><option value="0" ${!LAB.cdi ? 'selected' : ''}>sem rendimento</option></select></label></div>
-    <div class="seg" id="l-sub"><button data-s="ranking" aria-pressed="${LAB.sub === 'ranking'}">Ranking</button><button data-s="montar" aria-pressed="${LAB.sub === 'montar'}">Montar</button><button data-s="dinamico" aria-pressed="${LAB.sub === 'dinamico'}">Dinâmico</button><button data-s="comparar" aria-pressed="${LAB.sub === 'comparar'}">Comparar</button></div>
+    <div class="seg" id="l-sub"><button data-s="ranking" aria-pressed="${LAB.sub === 'ranking'}">Ranking</button><button data-s="montar" aria-pressed="${LAB.sub === 'montar'}">Montar</button><button data-s="dinamico" aria-pressed="${LAB.sub === 'dinamico'}">Dinâmico</button><button data-s="comparar" aria-pressed="${LAB.sub === 'comparar'}">Comparar</button><button data-s="carteira" aria-pressed="${LAB.sub === 'carteira'}">Carteira</button></div>
   </section><div id="l-corpo"></div>`;
   $('#l-tk').onchange = e => {
     const q = semAcento(e.target.value.trim()), v = q === 'IBOV' ? '^BVSP' : q;
@@ -114,7 +114,7 @@ async function telaLab() {
   document.querySelectorAll('#l-sub button').forEach(b => b.onclick = () => { LAB.sub = b.dataset.s; document.querySelectorAll('#l-sub button').forEach(x => x.setAttribute('aria-pressed', x === b)); subLab(); });
   subLab();
 }
-function subLab() { limpaGraficos(); ({ranking: labRanking, montar: labMontar, dinamico: labDinamico, comparar: labComparar})[LAB.sub](); }
+function subLab() { limpaGraficos(); ({ranking: labRanking, montar: labMontar, dinamico: labDinamico, comparar: labComparar, carteira: labCarteira})[LAB.sub](); }
 
 /* ---- ranking ---- */
 function garanteWorker() { if (!LAB.worker) LAB.worker = new Worker('lab-worker.js'); return LAB.worker; }
@@ -329,4 +329,42 @@ function labComparar() {
       <table><tr><th>Papel</th><th>Ao ano</th><th>C&S</th><th>Queda</th><th>Ops</th></tr>${linhas.map(l => `<tr style="cursor:pointer" data-t="${l.t}"><td><b>${nomeTk(l.t)}</b></td><td class="${l.cagr > l.bh ? 'pos' : 'neg'}">${pctP(l.cagr)}</td><td>${pctP(l.bh)}</td><td>${pctP(l.dd, 0)}</td><td>${l.ops}</td></tr>`).join('')}</table>`;
     el.querySelectorAll('tr[data-t]').forEach(tr => tr.onclick = () => { LAB.tk = tr.dataset.t; LAB.rank = null; LAB.sub = 'montar'; telaLab(); });
   };
+}
+
+/* ---- carteira do método (consenso) com limiar, vagas e data de início escolhidos ---- */
+const CART = {teta: '0.7', vagas: '3'};
+async function labCarteira() {
+  const corpo = $('#l-corpo');
+  if (!LAB.grade) { corpo.innerHTML = '<section class="cartao"><div class="vazio">Carregando a máquina do tempo…</div></section>'; try { LAB.grade = await (await fetch('data/consenso_grade.json')).json(); } catch (e) { corpo.innerHTML = '<section class="cartao"><div class="vazio">Não foi possível carregar os dados.</div></section>'; return; } }
+  const G = LAB.grade, tetas = [...new Set(Object.keys(G.curvas).map(k => k.split('|')[0]))], vagas = [...new Set(Object.keys(G.curvas).map(k => k.split('|')[1]))];
+  corpo.innerHTML = `<section class="cartao"><h3>Máquina do tempo da carteira do método</h3>
+    <p class="muted">A mesma carteira do Radar (consenso das 324 variantes, entre as 37 ações do estudo), simulada no passado. Escolha o limiar, o número de ações e o período (campos Início e Fim lá em cima). O Radar usa <b>70% e 3 ações</b>.</p>
+    <div class="lin"><label>Limiar de consenso<select id="k-teta">${tetas.map(t => `<option value="${t}" ${t === CART.teta ? 'selected' : ''}>${Math.round(t * 100)}%${t === '0.7' ? ' (atual)' : ''}</option>`).join('')}</select></label>
+    <label>Máximo de ações<select id="k-vag">${vagas.map(v => `<option value="${v}" ${v === CART.vagas ? 'selected' : ''}>${v}${v === '3' ? ' (atual)' : ''}</option>`).join('')}</select></label></div></section><div id="k-res"></div>`;
+  const desenha = () => {
+    CART.teta = $('#k-teta').value; CART.vagas = $('#k-vag').value;
+    const c = G.curvas[CART.teta + '|' + CART.vagas], d = G.datas;
+    let a = d.findIndex(x => x >= LAB.ini); if (a < 0) a = 0; let b = d.length - 1; while (b > a && d[b] > LAB.fim) b--;
+    if (b - a < 8) { $('#k-res').innerHTML = '<section class="cartao"><div class="vazio">Escolha um período de pelo menos 2 meses (o método começa em janeiro de 2006).</div></section>'; return; }
+    const cap = LAB.capital, ser = arr => d.slice(a, b + 1).map((t, i) => ({time: t, value: arr[a + i] / arr[a] * cap}));
+    const M = ser(c), I = ser(G.ibov), C = ser(G.cdi), anos = (new Date(d[b]) - new Date(d[a])) / 31557600000;
+    const aa = s => Math.pow(s.at(-1).value / cap, 1 / anos) - 1, dd = s => { let pk = -1, m = 0; for (const p of s) { pk = Math.max(pk, p.value); m = Math.min(m, p.value / pk - 1); } return m; };
+    const kpi = (r, v, x, cls) => `<div class="kpi"><div class="r">${r}</div><div class="v ${cls || ''}">${v}</div><div class="muted">${x}</div></div>`;
+    // ano a ano dentro do período
+    const fim = {}; for (let i = a; i <= b; i++) fim[d[i].slice(0, 4)] = i; let ant = a; const lin = [];
+    for (const y of Object.keys(fim).sort()) { const k = fim[y], r = arr => arr[k] / arr[ant] - 1, m = r(c), i = r(G.ibov), q = r(G.cdi);
+      lin.push(`<tr><td><b>${y}</b></td><td class="${m >= 0 ? 'pos' : 'neg'}">${pctP(m)}</td><td class="${i >= 0 ? 'pos' : 'neg'}">${pctP(i)}</td><td>${pctP(q)}</td><td>${m > i && m > q ? '🏆' : ''}</td></tr>`); ant = k; }
+    $('#k-res').innerHTML = `<section class="cartao"><h3>${dataBR(d[a])} a ${dataBR(d[b])}</h3><div class="kpis">
+      ${kpi(brl(cap) + ' viraram', brl(M.at(-1).value), pctP(aa(M)) + ' ao ano', M.at(-1).value > I.at(-1).value ? 'pos' : 'neg')}
+      ${kpi('Ibovespa', brl(I.at(-1).value), pctP(aa(I)) + ' ao ano')}${kpi('CDI', brl(C.at(-1).value), pctP(aa(C)) + ' ao ano')}
+      ${kpi('Pior queda', pctP(dd(M)), 'IBOV ' + pctP(dd(I)), 'neg')}</div>
+      <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Método</span><span><i style="background:${css('--linha-i')}"></i>IBOV</span><span><i style="background:${css('--linha-c')}"></i>CDI</span></div>
+      <div class="graf" id="k-graf"></div></section>
+      <section class="cartao"><h3>Ano a ano</h3><table><tr><th>Ano</th><th>Método</th><th>IBOV</th><th>CDI</th><th></th></tr>${lin.reverse().join('')}</table>
+      <p class="muted">🏆 = ganhou do IBOV e do CDI. O primeiro e o último ano podem ser parciais. IBOV sem dividendos. Simulação semanal com custo de 0,07% por ordem e caixa no CDI; pode diferir um pouco do gráfico do Radar (dados recalculados em datas diferentes). Lembre: limiar e número de ações foram escolhidos olhando 2006–2014; escolher "o melhor" depois de ver o resultado é otimismo.</p></section>`;
+    limpaGraficos(); const g = grafico($('#k-graf'), 260, true);
+    [[M, '--linha-m', 3], [I, '--linha-i', 2], [C, '--linha-c', 2]].forEach(([sr, cor, w]) => g.addLineSeries({color: css(cor), lineWidth: w, priceLineVisible: false, lastValueVisible: false}).setData(sr));
+    g.timeScale().fitContent();
+  };
+  $('#k-teta').onchange = desenha; $('#k-vag').onchange = desenha; desenha();
 }
