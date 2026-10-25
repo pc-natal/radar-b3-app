@@ -85,7 +85,8 @@ function telaRadar() {
     <li>O resultado é muito sensível a custos: com 0,15% por ordem em vez de 0,07%, o retorno histórico cai bastante.</li>
     <li>Desde 2022 o método rendeu menos que o CDI e o IBOV. Acompanhe sem dinheiro por semanas antes de decidir.</li></ul></section>`;
   $('#tela').innerHTML = `${aviso}
-  <section class="cartao"><h2>Ordens para o próximo pregão</h2>
+  ${cartaoMeu()}
+  <section class="cartao"><h2>Ordens do método para o próximo pregão</h2>
     <p class="muted">Calculadas com o fechamento de ${dataBR(R.ultimo_pregao)}. Executar na abertura.</p>
     ${o.vender.map(t => card(t, 'c-v', 'Vender')).join('')}
     ${o.comprar.map(t => card(t, 'c-c', 'Comprar', `<br><span class="muted">≈ ${brl(R.capital_referencia / R.vagas)}</span>`)).join('')}
@@ -130,6 +131,42 @@ function telaRadar() {
   if ($('#executa')) $('#executa').onclick = () => executaOrdens();
   $('#claude').onclick = () => perguntaClaude(contextoRadar());
   if ($('#copia')) $('#copia').onclick = () => copiaMetodo();
+  document.querySelectorAll('[data-acao]').forEach(bt => bt.onclick = () => acaoMinha(bt.dataset.acao, bt.dataset.tk));
+}
+/* "O que fazer na SUA carteira": cruza a carteira simulada com as ordens do dia */
+function acoesMinhas() {
+  const R = D.radar, o = R.ordens, {lista} = posicoes(cart()), tenho = new Set(lista.map(p => p.papel)), alvo = new Set([...o.manter, ...o.comprar]);
+  const vender = lista.filter(p => o.vender.includes(p.papel)).map(p => p.papel);
+  const comprar = o.comprar.filter(t => !tenho.has(t));
+  const manter = lista.filter(p => alvo.has(p.papel)).map(p => p.papel);
+  const minhas = lista.filter(p => !alvo.has(p.papel) && !o.vender.includes(p.papel)).map(p => p.papel);   // compradas por conta própria
+  return {vender, comprar, manter, minhas, vazia: lista.length === 0};
+}
+function cartaoMeu() {
+  const R = D.radar, A = acoesMinhas(), dt = R.detalhes;
+  const linha = (cls, rot, t, txt, botao) => `<div class="ordem ${cls}" style="margin:8px 0"><div style="flex:1"><div class="tag">${rot}</div><div class="tk">${t}</div><div class="nm">${txt}</div></div>${botao || ''}</div>`;
+  const bt = (acao, t, rot, cor) => `<button class="btn ${cor}" style="width:auto;margin:0;padding:10px 14px" data-acao="${acao}" data-tk="${t}">${rot}</button>`;
+  let corpo;
+  if (A.vazia) corpo = `<p>Sua carteira simulada está vazia. Para começar, toque no botão verde abaixo, em <b>Começar a simulação copiando a carteira do método</b>.</p>`;
+  else {
+    const urg = A.vender.length + A.comprar.length;
+    corpo = (urg ? `<p><b>${urg === 1 ? 'Há 1 ação' : 'Há ' + urg + ' ações'} para você fazer hoje.</b> Toque no botão de cada uma (ou faça na sua corretora, se um dia usar dinheiro real).</p>`
+                 : `<p style="font-size:17px">✅ <b>Nada a fazer hoje.</b> Sua carteira já está de acordo com o método.</p>`)
+      + A.vender.map(t => linha('c-v', '🔴 VENDER — o método saiu desta ação', t, 'Você tem esta ação. Venda na abertura do pregão.', bt('V', t, 'Vender', 'v'))).join('')
+      + A.comprar.map(t => linha('c-c', '🟢 COMPRAR — sinal novo do método', t, `Fechou a ${brl(dt[t] && dt[t].fechamento)}. Compre na abertura do pregão.`, bt('C', t, 'Comprar', 'c'))).join('')
+      + A.manter.map(t => linha('c-m', '🔵 MANTER', t, 'Continue com ela. Nada a fazer.')).join('')
+      + A.minhas.map(t => linha('', '⚪ COMPRADA POR VOCÊ', t, 'Esta ação não está na carteira do método, então ele não manda sinal para ela. A decisão é sua.')).join('');
+  }
+  return `<section class="cartao" style="border:2px solid var(--acento)"><h2>O que fazer na SUA carteira</h2>
+    <p class="muted">Comparação da sua carteira simulada com as ordens de ${dataBR(R.ultimo_pregao)}. Atualiza sozinho todo dia útil por volta das 19h; quando mudar algo, chega uma notificação do ntfy.</p>
+    ${corpo}</section>`;
+}
+function acaoMinha(tipo, t) {
+  const R = D.radar, px = preco(t); if (!px) return alerta('Sem preço para ' + t + '.');
+  if (tipo === 'V') { const p = posicoes(cart()).lista.find(x => x.papel === t); if (p && registra('V', t, p.qtd, px, 'radar')) alerta(`Vendeu ${p.qtd} ${t} a ${brl(px.preco)} (simulado).`); }
+  else { const {caixa, lista} = posicoes(cart()), livres = Math.max(1, R.vagas - lista.length); const q = Math.floor(Math.min(caixa, caixa / Math.min(livres, Math.max(1, acoesMinhas().comprar.length))) / px.preco);
+    if (q > 0 && registra('C', t, q, px, 'radar')) alerta(`Comprou ${q} ${t} a ${brl(px.preco)} (simulado).`); else if (q <= 0) alerta('Saldo insuficiente na carteira simulada. Venda primeiro o que o método mandou vender.'); }
+  telaRadar();
 }
 function copiaMetodo() {
   // compra, em partes iguais, as ações que o método terá no próximo pregão (manter + comprar)
