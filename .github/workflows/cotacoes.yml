@@ -1,7 +1,7 @@
 name: Cotações (a cada 15 min no pregão)
 on:
   schedule:
-    - cron: '*/15 13-21 * * 1-5'   # 10h00–18h45 de Brasília (cobre o horário de verão americano, quando a B3 fecha às 18h)
+    - cron: '*/15 13-21 * * 1-5'   # 10h00–18h45 de Brasília (de novembro a março, fora do horário de verão americano, a B3 fecha às 18h)
   workflow_dispatch: {}
 permissions:
   contents: write
