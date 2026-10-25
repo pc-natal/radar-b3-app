@@ -241,7 +241,7 @@ function renderRes(el, D_, r, a, b, nota) {
   <section class="cartao"><h3>Rendimento por período</h3>
     <div class="seg" id="p-per"><button data-p="ano" aria-pressed="true">Por ano</button><button data-p="mes" aria-pressed="false">Por mês</button></div>
     <div id="p-tab" class="rolagem" style="max-height:460px"><div class="vazio">calculando…</div></div>
-    <p class="muted">C&amp;S = comprar e segurar o próprio papel. IBOV sem dividendos. 🏆 = a estratégia ganhou do IBOV e do CDI. O primeiro e o último período podem ser parciais.</p></section>
+    <p class="muted">C&amp;S = comprar e segurar o próprio papel. IBOV já inclui os dividendos (índice de retorno total). 🏆 = a estratégia ganhou do IBOV e do CDI. O primeiro e o último período podem ser parciais.</p></section>
   <section class="cartao"><h3>Operações</h3><div class="rolagem" style="max-height:420px"><table><tr><th>Entrada</th><th>Saída</th><th>Dias</th><th>Resultado</th></tr>
     ${ops.slice().reverse().map(o => `<tr><td>${dataBR(o.e)}</td><td>${o.x ? dataBR(o.x) : 'aberta'}</td><td>${o.dias}</td><td class="${corv(o.r)}">${pctP(o.r)}</td></tr>`).join('')}</table></div></section>`;
   tabelaPeriodos(datas, eq, bh, cd);
@@ -465,7 +465,7 @@ async function rodaCarteira() {
     <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Carteira</span><span><i style="background:${css('--linha-i')}"></i>IBOV</span><span><i style="background:${css('--linha-c')}"></i>CDI</span>${cmp ? `<span><i style="background:${css('--compra')}"></i>${CART.cmp}</span>` : ''}</div>
     <div class="graf" id="c-graf"></div></section>
     <section class="cartao"><h3>Rendimento por período</h3><div class="seg" id="c-per"><button data-p="ano" aria-pressed="true">Por ano</button><button data-p="mes" aria-pressed="false">Por mês</button></div>
-      <div id="c-tab" class="rolagem" style="max-height:460px"></div><p class="muted">🏆 = a carteira ganhou do IBOV e do CDI. IBOV sem dividendos. O primeiro e o último período podem ser parciais.</p></section>
+      <div id="c-tab" class="rolagem" style="max-height:460px"></div><p class="muted">🏆 = a carteira ganhou do IBOV e do CDI. IBOV já inclui os dividendos (índice de retorno total). O primeiro e o último período podem ser parciais.</p></section>
     <section class="cartao"><h3>Ações na carteira no fim do período</h3>${res.abertas.length && b === cal.length - 1 ? res.abertas.map(o => `<div><b>${o.tk}</b> desde ${dataBR(o.e)} · <span class="${corv(o.r)}">${pctP(o.r)}</span></div>`).join('') : '<p class="muted">Nenhuma (100% no CDI) ou período encerrado antes de hoje.</p>'}</section>
     <section class="cartao"><h3>Operações (${ops.length})</h3><div class="rolagem" style="max-height:420px"><table><tr><th>Papel</th><th>Entrada</th><th>Saída</th><th>Resultado</th></tr>
       ${ops.slice().reverse().map(o => `<tr><td><b>${o.tk}</b></td><td>${dataBR(o.e)}</td><td>${dataBR(o.x)}${o.motivo === 'stop' ? ' (stop)' : ''}</td><td class="${corv(o.r)}">${pctP(o.r)}</td></tr>`).join('')}</table></div></section>`;
