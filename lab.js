@@ -92,8 +92,7 @@ async function telaLab() {
   $('#tela').innerHTML = `
   <section class="cartao"><h2>Laboratório de estratégias</h2>
     <p class="muted">Teste qualquer indicador (ou 2 a 3 combinados), com ou sem stop, em qualquer período. Sinal no fechamento, ordem na abertura do dia seguinte, custo de 0,07% por ordem.</p>
-    <label>Papel<input id="l-tk" list="l-tks" type="search" autocomplete="off" value="${LAB.tk === '^BVSP' ? 'IBOV' : LAB.tk}" placeholder="Código ou nome (ex.: PETR4, Vale)"><datalist id="l-tks">${papeis.map(([v, r]) => `<option value="${v === '^BVSP' ? 'IBOV' : v}">${r}</option>`).join('')}</datalist></label>
-    <p class="muted" style="margin-top:-4px">${dados_.nome || ''}</p>
+    <label>Papel<button class="btn sec" id="l-tk" style="margin:0;text-align:left;display:flex;justify-content:space-between"><span><b>${nomeTk(LAB.tk)}</b> · ${dados_.nome || ''}</span><span>🔍 trocar</span></button></label>
     ${dados_.d.length < 1500 ? `<p class="muted" style="color:var(--venda)">Histórico curto: ${dados_.d.length} pregões (desde ${dataBR(dados_.d[0])}). Resultados valem pouco estatisticamente, e o método dinâmico precisa de cerca de 6 anos de dados.</p>` : ''}
     <div class="lin"><label>Início<input id="l-ini" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.ini}"></label>
     <label>Fim<input id="l-fim" type="date" min="${dados_.d[0]}" max="${dados_.d.at(-1)}" value="${LAB.fim}"></label></div>
@@ -101,12 +100,7 @@ async function telaLab() {
     <label>Dinheiro parado<select id="l-cdi"><option value="1" ${LAB.cdi ? 'selected' : ''}>rende CDI</option><option value="0" ${!LAB.cdi ? 'selected' : ''}>sem rendimento</option></select></label></div>
     <div class="seg" id="l-sub"><button data-s="ranking" aria-pressed="${LAB.sub === 'ranking'}">Ranking</button><button data-s="montar" aria-pressed="${LAB.sub === 'montar'}">Montar</button><button data-s="dinamico" aria-pressed="${LAB.sub === 'dinamico'}">Dinâmico</button><button data-s="comparar" aria-pressed="${LAB.sub === 'comparar'}">Comparar</button><button data-s="carteira" aria-pressed="${LAB.sub === 'carteira'}">Carteira</button></div>
   </section><div id="l-corpo"></div>`;
-  $('#l-tk').onchange = e => {
-    const q = semAcento(e.target.value.trim()), v = q === 'IBOV' ? '^BVSP' : q;
-    const u = D.universo.find(x => x.papel === v) || D.universo.find(x => semAcento(x.nome).includes(q) || x.papel.startsWith(q));
-    if (!u) { alerta('Papel não encontrado: ' + e.target.value); return; }
-    LAB.tk = u.papel; LAB.rank = null; telaLab(); };
-  $('#l-tk').onfocus = e => e.target.select();
+  $('#l-tk').onclick = () => escolhePapel(t => { if (!t) return; LAB.tk = t; LAB.rank = null; telaLab(); });
   $('#l-ini').onchange = e => { LAB.ini = e.target.value; subLab(); };
   $('#l-fim').onchange = e => { LAB.fim = e.target.value; subLab(); };
   $('#l-cap').onchange = e => { LAB.capital = +e.target.value || 5000; subLab(); };
@@ -336,42 +330,163 @@ function labComparar() {
   };
 }
 
-/* ---- carteira do método (consenso) com limiar, vagas e data de início escolhidos ---- */
-const CART = {teta: '0.7', vagas: '3'};
+/* ---- carteira: o app escolhe as ações (até N das 37 do estudo), com parâmetros dinâmicos ou fixos ----
+   Mesma lógica do motor Python (carteira.py): sinal no fechamento, ordem na abertura, prioridade pelo
+   consenso (dinâmico) ou pela força de 6 meses (fixo), caixa no CDI, custo por ordem. */
+const CART = {modo: 'din', grupo: '*', janela: '*', comite: '*', teta: 0.7, vagas: 3, cmp: '', est: 'IFR Wilder', p: {...PADRAO['IFR Wilder']}, stop: 'HiLo', sp: {...PADRAO_STOP['HiLo']}};
+const GRUPOS = [['*', 'Todas as estratégias (método atual)'], ['Todas (~7 mil)', 'Grupo "todas as ~7 mil"'], ['IFR + HiLo', 'Só IFR com stop HiLo'], ['Enxuto (clássicos)', 'Só as clássicas']];
+const JANELAS = [['*', 'Todas (atual)'], [250, '1 ano'], [500, '2 anos'], [750, '3 anos'], [1000, '4 anos'], [1250, '5 anos'], [0, 'Todo o histórico']];
+const COMITES_C = [['*', 'Todos (atual)'], ['Top-1', 'Top-1 (a melhor sozinha)'], ['Top-2 unânime', 'Top-2 (as 2 melhores concordam)'], ['Top-3 maioria', 'Top-3 (2 das 3 melhores)']];
+
+async function carregaEstudo(prog) {
+  if (LAB.est37) return LAB.est37;
+  const tks = D.universo.filter(u => !u.extra && u.papel !== '^BVSP').map(u => u.papel), P = {};
+  for (let i = 0; i < tks.length; i++) { prog && prog(i / tks.length); try { P[tks[i]] = await labCarrega(tks[i]); } catch (e) {} }
+  return (LAB.est37 = P);
+}
+function simCarteira(cal, S, vagas, custo, cdi) {
+  // S: [{tk, HO, HC, FI, ON, PERM, FORCA}] alinhados em cal
+  const T = cal.length, P = S.length, eq = new Float64Array(T), pos = new Int8Array(P), val = new Float64Array(P), ent = new Array(P).fill(null), ops = [];
+  let caixa = 1; eq[0] = 1;
+  const sai = (p, t, motivo) => { ops.push({tk: S[p].tk, e: cal[ent[p].t], x: cal[t], r: val[p] / ent[p].v - 1, motivo}); };
+  for (let t = 1; t < T; t++) {
+    caixa *= 1 + cdi[t];
+    for (let p = 0; p < P; p++) if (pos[p]) val[p] *= 1 + S[p].ON[t];
+    for (let p = 0; p < P; p++) if (pos[p] && S[p].HO[t] === 0) { const v = val[p] * (1 - custo); val[p] = v; sai(p, t, 'sinal'); caixa += v; val[p] = 0; pos[p] = 0; }
+    let livres = vagas; for (let p = 0; p < P; p++) livres -= pos[p];
+    if (livres > 0) {
+      const cand = []; for (let p = 0; p < P; p++) if (!pos[p] && S[p].HO[t] === 1 && S[p].PERM[t - 1] === 1) cand.push(p);
+      if (cand.length) {
+        cand.sort((a, b) => S[b].FORCA[t - 1] - S[a].FORCA[t - 1] || a - b);
+        let total = caixa; for (let p = 0; p < P; p++) total += val[p]; const fatia = total / vagas;
+        for (let q = 0; q < Math.min(livres, cand.length); q++) { const p = cand[q], ap = Math.min(fatia, caixa); if (ap <= 1e-9) break;
+          caixa -= ap; val[p] = ap * (1 - custo); pos[p] = 1; ent[p] = {t, v: ap}; }
+      }
+    }
+    for (let p = 0; p < P; p++) if (pos[p]) { val[p] *= S[p].FI[t]; if (S[p].HC[t] === 0) { sai(p, t, 'stop'); caixa += val[p]; val[p] = 0; pos[p] = 0; } }
+    let v = caixa; for (let p = 0; p < P; p++) v += val[p]; eq[t] = v;
+  }
+  const abertas = []; for (let p = 0; p < P; p++) if (pos[p]) abertas.push({tk: S[p].tk, e: cal[ent[p].t], r: val[p] / ent[p].v - 1});
+  return {eq, ops, abertas};
+}
+function alinha(cal, D_, extra) {
+  // séries do papel no calendário comum; extra(i_papel) devolve {ho, hc, fi} no índice do próprio papel
+  const T = cal.length, mapa = new Map(D_.d.map((d, i) => [d, i]));
+  const HO = new Int8Array(T), HC = new Int8Array(T), FI = new Float64Array(T).fill(1), ON = new Float64Array(T), PERM = new Int8Array(T), FORCA = new Float64Array(T).fill(-9);
+  for (let t = 0; t < T; t++) { const i = mapa.get(cal[t]); if (i === undefined) continue;
+    PERM[t] = 1; if (i > 0) ON[t] = D_.o[i] / D_.c[i - 1] - 1;
+    const x = extra(i, t); HO[t] = x.ho; HC[t] = x.hc; FI[t] = x.fi; FORCA[t] = x.forca; }
+  return {HO, HC, FI, ON, PERM, FORCA};
+}
+const mom126 = (D_, i) => i >= 126 ? D_.c[i] / D_.c[i - 126] - 1 : -9;
+
 async function labCarteira() {
   const corpo = $('#l-corpo');
-  if (!LAB.grade) { corpo.innerHTML = '<section class="cartao"><div class="vazio">Carregando a máquina do tempo…</div></section>'; try { LAB.grade = await (await fetch('data/consenso_grade.json')).json(); } catch (e) { corpo.innerHTML = '<section class="cartao"><div class="vazio">Não foi possível carregar os dados.</div></section>'; return; } }
-  const G = LAB.grade, tetas = [...new Set(Object.keys(G.curvas).map(k => k.split('|')[0]))], vagas = [...new Set(Object.keys(G.curvas).map(k => k.split('|')[1]))];
-  corpo.innerHTML = `<section class="cartao"><h3>Máquina do tempo da carteira do método</h3>
-    <p class="muted">A mesma carteira do Radar (consenso das 324 variantes, entre as 37 ações do estudo), simulada no passado. Escolha o limiar, o número de ações e o período (campos Início e Fim lá em cima). O Radar usa <b>70% e 3 ações</b>.</p>
-    <div class="lin"><label>Limiar de consenso<select id="k-teta">${tetas.map(t => `<option value="${t}" ${t === CART.teta ? 'selected' : ''}>${Math.round(t * 100)}%${t === '0.7' ? ' (atual)' : ''}</option>`).join('')}</select></label>
-    <label>Máximo de ações<select id="k-vag">${vagas.map(v => `<option value="${v}" ${v === CART.vagas ? 'selected' : ''}>${v}${v === '3' ? ' (atual)' : ''}</option>`).join('')}</select></label></div></section><div id="k-res"></div>`;
-  const desenha = () => {
-    CART.teta = $('#k-teta').value; CART.vagas = $('#k-vag').value;
-    const c = G.curvas[CART.teta + '|' + CART.vagas], d = G.datas;
-    let a = d.findIndex(x => x >= LAB.ini); if (a < 0) a = 0; let b = d.length - 1; while (b > a && d[b] > LAB.fim) b--;
-    if (b - a < 8) { $('#k-res').innerHTML = '<section class="cartao"><div class="vazio">Escolha um período de pelo menos 2 meses (o método começa em janeiro de 2006).</div></section>'; return; }
-    const cap = LAB.capital, ser = arr => d.slice(a, b + 1).map((t, i) => ({time: t, value: arr[a + i] / arr[a] * cap}));
-    const M = ser(c), I = ser(G.ibov), C = ser(G.cdi), anos = (new Date(d[b]) - new Date(d[a])) / 31557600000;
-    const aa = s => Math.pow(s.at(-1).value / cap, 1 / anos) - 1, dd = s => { let pk = -1, m = 0; for (const p of s) { pk = Math.max(pk, p.value); m = Math.min(m, p.value / pk - 1); } return m; };
-    const kpi = (r, v, x, cls) => `<div class="kpi"><div class="r">${r}</div><div class="v ${cls || ''}">${v}</div><div class="muted">${x}</div></div>`;
-    // ano a ano dentro do período
-    const fim = {}; for (let i = a; i <= b; i++) fim[d[i].slice(0, 4)] = i; let ant = a; const lin = [];
-    for (const y of Object.keys(fim).sort()) { const k = fim[y], r = arr => arr[k] / arr[ant] - 1, m = r(c), i = r(G.ibov), q = r(G.cdi);
-      lin.push(`<tr><td><b>${y}</b></td><td class="${m >= 0 ? 'pos' : 'neg'}">${pctP(m)}</td><td class="${i >= 0 ? 'pos' : 'neg'}">${pctP(i)}</td><td>${pctP(q)}</td><td>${m > i && m > q ? '🏆' : ''}</td></tr>`); ant = k; }
-    $('#k-res').innerHTML = `<section class="cartao"><h3>${dataBR(d[a])} a ${dataBR(d[b])}</h3><div class="kpis">
-      ${kpi(brl(cap) + ' viraram', brl(M.at(-1).value), pctP(aa(M)) + ' ao ano', M.at(-1).value > I.at(-1).value ? 'pos' : 'neg')}
-      ${kpi('Ibovespa', brl(I.at(-1).value), pctP(aa(I)) + ' ao ano')}${kpi('CDI', brl(C.at(-1).value), pctP(aa(C)) + ' ao ano')}
-      ${kpi('Pior queda', pctP(dd(M)), 'IBOV ' + pctP(dd(I)), 'neg')}</div>
-      <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Método</span><span><i style="background:${css('--linha-i')}"></i>IBOV</span><span><i style="background:${css('--linha-c')}"></i>CDI</span></div>
-      <div class="graf" id="k-graf"></div></section>
-      <section class="cartao"><h3>Ano a ano</h3><table><tr><th>Ano</th><th>Método</th><th>IBOV</th><th>CDI</th><th></th></tr>${lin.reverse().join('')}</table>
-      <p class="muted">🏆 = ganhou do IBOV e do CDI. O primeiro e o último ano podem ser parciais. IBOV sem dividendos. Simulação semanal com custo de 0,07% por ordem e caixa no CDI; pode diferir um pouco do gráfico do Radar (dados recalculados em datas diferentes). Lembre: limiar e número de ações foram escolhidos olhando 2006–2014; escolher "o melhor" depois de ver o resultado é otimismo.</p></section>`;
-    limpaGraficos(); const g = grafico($('#k-graf'), 260, true);
-    [[M, '--linha-m', 3], [I, '--linha-i', 2], [C, '--linha-c', 2]].forEach(([sr, cor, w]) => g.addLineSeries({color: css(cor), lineWidth: w, priceLineVisible: false, lastValueVisible: false}).setData(sr));
-    g.timeScale().fitContent();
+  const sel = (id, lista, v) => `<select id="${id}">${opt(lista, v)}</select>`;
+  corpo.innerHTML = `<section class="cartao"><h3>Carteira: o app escolhe as ações</h3>
+    <p class="muted">Simula uma carteira com as 37 ações do estudo: a cada dia o método escolhe até N ações para ter, compra e vende sozinho. Período, capital e CDI vêm dos campos lá em cima (o campo Papel não é usado aqui).</p>
+    <div class="seg" id="c-modo"><button data-m="din" aria-pressed="${CART.modo === 'din'}">Parâmetros dinâmicos</button><button data-m="fixo" aria-pressed="${CART.modo === 'fixo'}">Parâmetros fixos</button></div>
+    <div id="c-opc"></div>
+    <div class="lin"><label>Máximo de ações${sel('c-vag', [1, 2, 3, 4, 5, 8].map(v => [v, v + (v === 3 ? ' (atual)' : '')]), CART.vagas)}</label>
+    <label>Comparar também com<button class="btn sec" id="c-cmp" style="margin:0">${CART.cmp || 'escolher ação…'}</button></label></div>
+    <button class="btn" id="c-rodar">Simular</button></section><div id="c-res2"></div>`;
+  const opcoes = () => {
+    $('#c-opc').innerHTML = CART.modo === 'din' ? `
+      <p class="muted">Toda semana, olhando só o passado, as variantes do método escolhem os melhores indicadores <b>de cada ação</b>; a carteira compra as ações em que pelo menos o limiar das variantes concorda.</p>
+      <label>Entre quais estratégias escolher${sel('c-gru', GRUPOS, CART.grupo)}</label>
+      <div class="lin"><label>Olhar para trás${sel('c-jan', JANELAS, CART.janela)}</label><label>Comitê${sel('c-com', COMITES_C, CART.comite)}</label></div>
+      <label>Limiar de consenso${sel('c-teta', [0.34, 0.5, 0.6, 0.7, 0.8, 0.9, 1].map(v => [v, v === 1 ? 'todas concordam (100%)' : Math.round(v * 100) + '%' + (v === 0.7 ? ' (atual)' : '')]), CART.teta)}</label>`
+      : `<p class="muted">A mesma estratégia em todas as ações; quando várias dão sinal ao mesmo tempo, entram as que mais subiram nos últimos 6 meses.</p>
+      <label>Indicador${sel('c-est', NOMES_ESTUDO.map(n => [n, n]), CART.est)}</label><div class="lin" style="flex-wrap:wrap">${campos(CART.p, 'p')}</div>
+      <label>Stop${sel('c-stop', NOMES_STOP.map(n => [n, n]), CART.stop)}</label><div class="lin" style="flex-wrap:wrap">${campos(CART.sp, 'sp')}</div>`;
+    const ch = (id, f) => { const e = $(id); if (e) e.onchange = f; };
+    ch('#c-gru', e => CART.grupo = e.target.value); ch('#c-jan', e => CART.janela = e.target.value); ch('#c-com', e => CART.comite = e.target.value); ch('#c-teta', e => CART.teta = +e.target.value);
+    ch('#c-est', e => { CART.est = e.target.value; CART.p = {...PADRAO[CART.est]}; opcoes(); }); ch('#c-stop', e => { CART.stop = e.target.value; CART.sp = {...PADRAO_STOP[CART.stop]}; opcoes(); });
+    document.querySelectorAll('#c-opc input[data-pk]').forEach(inp => inp.onchange = () => { (inp.dataset.pref === 'p' ? CART.p : CART.sp)[inp.dataset.pk] = +inp.value; });
   };
-  $('#k-teta').onchange = desenha; $('#k-vag').onchange = desenha; desenha();
+  function campos(obj, pref) { return Object.keys(obj).filter(k => !SKIP.includes(k)).map(k => `<label>${ROT[k] || k}<input data-pref="${pref}" data-pk="${k}" type="number" inputmode="decimal" step="any" value="${obj[k]}"></label>`).join(''); }
+  opcoes();
+  document.querySelectorAll('#c-modo button').forEach(b => b.onclick = () => { CART.modo = b.dataset.m; document.querySelectorAll('#c-modo button').forEach(x => x.setAttribute('aria-pressed', x === b)); opcoes(); });
+  $('#c-vag').onchange = e => CART.vagas = +e.target.value;
+  $('#c-cmp').onclick = () => escolhePapel(t => { CART.cmp = t; $('#c-cmp').textContent = CART.cmp || 'escolher ação…'; }, true);
+  $('#c-rodar').onclick = rodaCarteira;
+}
+
+async function rodaCarteira() {
+  const el = $('#c-res2'); el.innerHTML = '<section class="cartao"><div class="vazio">Carregando as 37 ações… <b id="c-pr">0%</b><br><span class="muted">(só na primeira vez; ~4 MB)</span></div></section>';
+  const P = await carregaEstudo(f => { const x = $('#c-pr'); if (x) x.textContent = Math.round(f * 100) + '%'; });
+  let cel = null;
+  if (CART.modo === 'din') { try { cel = LAB.celulas || (LAB.celulas = await (await fetch('data/consenso_celulas.json')).json()); } catch (e) { el.innerHTML = '<section class="cartao"><div class="vazio">Dados do método ainda não disponíveis. Tente depois da próxima atualização diária.</div></section>'; return; } }
+  el.innerHTML = '<section class="cartao"><div class="vazio">Simulando…</div></section>'; await new Promise(r => setTimeout(r, 30));
+  const cal = cel ? cel.datas : [...new Set(Object.values(P).flatMap(x => x.d.filter(d => d >= '2006-01-02')))].sort();
+  let S = [];
+  if (cel) {
+    const usa = cel.celulas.map((c, k) => (CART.grupo === '*' || c.estrategias === CART.grupo) && (CART.janela === '*' || String(c.janela) === String(CART.janela)) && (CART.comite === '*' || c.comite === CART.comite) ? k : -1).filter(k => k >= 0);
+    const nVar = usa.length * cel.por_celula, posCal = new Map(cal.map((d, i) => [d, i]));
+    for (const [tk, linhas] of Object.entries(cel.papeis)) { const D_ = P[tk]; if (!D_) continue;
+      const frac = t => { let s = 0; for (const k of usa) { const ch = linhas[k].charCodeAt(t); if (ch === 46) return -1; s += ch - 48; } return s / nVar; };
+      const fr = new Float64Array(cal.length); for (let t = 0; t < cal.length; t++) fr[t] = frac(t);
+      S.push({tk, ...alinha(cal, D_, (i, t) => { const f = fr[t]; if (f < 0) return {ho: 0, hc: 0, fi: 1, forca: -9}; const h = f >= CART.teta - 1e-9 ? 1 : 0;
+        return {ho: h, hc: h, fi: h ? D_.c[i] / D_.o[i] : 1, forca: f + 1e-6 * Math.max(-1, Math.min(5, mom126(D_, i)))}; })});
+    }
+  } else {
+    for (const [tk, D_] of Object.entries(P)) {
+      const s = Motor.sinalEstudo(CART.est, CART.p, D_.o, D_.h, D_.l, D_.c), [g, v, us] = Motor.sinalStop(CART.stop, CART.sp, D_.o, D_.h, D_.l, D_.c);
+      const r = Motor.simula(D_.o, D_.h, D_.l, D_.c, s, g, v, us, Motor.CUSTO);
+      S.push({tk, ...alinha(cal, D_, i => ({ho: r.ho[i], hc: r.hc[i], fi: r.fi[i], forca: mom126(D_, i - 0)}))});
+    }
+    // força do dia anterior do próprio papel (como no Python: FORCA[t-1] usa o fechamento de t-1)
+  }
+  const cdiAll = Motor.cdiDiario(cal, LAB.cdiM), res = simCarteira(cal, S, CART.vagas, Motor.CUSTO, cdiAll);
+  // recorte do período escolhido
+  let a = cal.findIndex(d => d >= LAB.ini); if (a < 1) a = 1; let b = cal.length - 1; while (b > a && cal[b] > LAB.fim) b--;
+  if (b - a < 20) { el.innerHTML = '<section class="cartao"><div class="vazio">Escolha um período de pelo menos um mês (a simulação começa em 2006).</div></section>'; return; }
+  const cap = LAB.capital, datas = cal.slice(a - 1, b + 1), eq = Array.from(res.eq.subarray(a - 1, b + 1), x => x / res.eq[a - 1] * cap);
+  const serie = D_ => { const m = new Map(D_.d.map((d, i) => [d, D_.c[i]])); let u = null; const arr = datas.map(d => (u = m.get(d) ?? u)); const b0 = arr.find(x => x != null); return arr.map(x => x == null ? cap : x / b0 * cap); };
+  const ib = serie(await labCarrega('^BVSP')); let acc = cap; const cd = [cap]; for (let t = a; t <= b; t++) { acc *= LAB.cdi ? 1 + cdiAll[t] : 1; cd.push(acc); }
+  const cmp = CART.cmp ? serie(await labCarrega(CART.cmp)) : null;
+  const anos = (new Date(datas.at(-1)) - new Date(datas[0])) / 31557600000, aa = arr => Math.pow(arr.at(-1) / cap, 1 / anos) - 1;
+  const dd = arr => { let pk = 0, m = 0; for (const x of arr) { pk = Math.max(pk, x); m = Math.min(m, x / pk - 1); } return m; };
+  const ops = res.ops.filter(o => o.x >= datas[0] && o.e <= datas.at(-1)), gan = ops.filter(o => o.r > 0);
+  const kpi = (r, v, x, cls) => `<div class="kpi"><div class="r">${r}</div><div class="v ${cls || ''}">${v}</div><div class="muted">${x}</div></div>`;
+  const nomeCfg = CART.modo === 'din' ? `${GRUPOS.find(g => g[0] === CART.grupo)[1]} · ${JANELAS.find(j => String(j[0]) === String(CART.janela))[1]} · ${COMITES_C.find(c => c[0] === CART.comite)[1]} · limiar ${Math.round(CART.teta * 100)}%` : `${CART.est} + stop ${CART.stop} (parâmetros fixos)`;
+  el.innerHTML = `<section class="cartao"><h3>${dataBR(datas[0])} a ${dataBR(datas.at(-1))}</h3><p class="muted">${nomeCfg} · até ${CART.vagas} ações</p><div class="kpis">
+    ${kpi(brl(cap) + ' viraram', brl(eq.at(-1)), pctP(aa(eq)) + ' ao ano', eq.at(-1) > ib.at(-1) ? 'pos' : 'neg')}${kpi('Ibovespa', brl(ib.at(-1)), pctP(aa(ib)) + ' ao ano')}
+    ${kpi('CDI', brl(cd.at(-1)), pctP(aa(cd)) + ' ao ano')}${cmp ? kpi(CART.cmp + ' (comprar e segurar)', brl(cmp.at(-1)), pctP(aa(cmp)) + ' ao ano') : ''}
+    ${kpi('Pior queda', pctP(dd(eq)), 'IBOV ' + pctP(dd(ib)), 'neg')}${kpi('Operações', String(ops.length), ops.length ? 'acerto ' + pctP(gan.length / ops.length, 0) : '')}</div>
+    <div class="legenda"><span><i style="background:${css('--linha-m')}"></i>Carteira</span><span><i style="background:${css('--linha-i')}"></i>IBOV</span><span><i style="background:${css('--linha-c')}"></i>CDI</span>${cmp ? `<span><i style="background:${css('--compra')}"></i>${CART.cmp}</span>` : ''}</div>
+    <div class="graf" id="c-graf"></div></section>
+    <section class="cartao"><h3>Rendimento por período</h3><div class="seg" id="c-per"><button data-p="ano" aria-pressed="true">Por ano</button><button data-p="mes" aria-pressed="false">Por mês</button></div>
+      <div id="c-tab" class="rolagem" style="max-height:460px"></div><p class="muted">🏆 = a carteira ganhou do IBOV e do CDI. IBOV sem dividendos. O primeiro e o último período podem ser parciais.</p></section>
+    <section class="cartao"><h3>Ações na carteira no fim do período</h3>${res.abertas.length && b === cal.length - 1 ? res.abertas.map(o => `<div><b>${o.tk}</b> desde ${dataBR(o.e)} · <span class="${corv(o.r)}">${pctP(o.r)}</span></div>`).join('') : '<p class="muted">Nenhuma (100% no CDI) ou período encerrado antes de hoje.</p>'}</section>
+    <section class="cartao"><h3>Operações (${ops.length})</h3><div class="rolagem" style="max-height:420px"><table><tr><th>Papel</th><th>Entrada</th><th>Saída</th><th>Resultado</th></tr>
+      ${ops.slice().reverse().map(o => `<tr><td><b>${o.tk}</b></td><td>${dataBR(o.e)}</td><td>${dataBR(o.x)}${o.motivo === 'stop' ? ' (stop)' : ''}</td><td class="${corv(o.r)}">${pctP(o.r)}</td></tr>`).join('')}</table></div></section>`;
+  limpaGraficos(); const g = grafico($('#c-graf'), 280, true), ln = (arr, cor, w) => g.addLineSeries({color: cor, lineWidth: w, priceLineVisible: false, lastValueVisible: false}).setData(datas.map((d, i) => ({time: d, value: arr[i]})));
+  ln(eq, css('--linha-m'), 3); ln(ib, css('--linha-i'), 2); ln(cd, css('--linha-c'), 2); if (cmp) ln(cmp, css('--compra'), 2); g.timeScale().fitContent();
+  const cols = [['Carteira', eq], ['IBOV', ib], ['CDI', cd]].concat(cmp ? [[CART.cmp, cmp]] : []);
+  const tab = modo => {
+    const chave = d => modo === 'ano' ? d.slice(0, 4) : d.slice(0, 7), fim = new Map(); datas.forEach((d, i) => fim.set(chave(d), i));
+    let ant = 0, ga = 0, n = 0; const lin = [];
+    for (const [k, i] of fim) { if (i === 0) continue; const r = arr => arr[i] / arr[ant] - 1, rs = cols.map(c => r(c[1])); n++; const win = rs[0] > rs[1] && rs[0] > rs[2]; if (win) ga++;
+      const rot = modo === 'ano' ? k : ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][+k.slice(5) - 1] + '/' + k.slice(2, 4);
+      lin.push(`<tr><td><b>${rot}</b></td>${rs.map(x => `<td class="${corv(x)}">${pctP(x)}</td>`).join('')}<td>${win ? '🏆' : ''}</td></tr>`); ant = i; }
+    $('#c-tab').innerHTML = `<p class="muted">A carteira ganhou do IBOV e do CDI em <b>${ga} de ${n}</b> ${modo === 'ano' ? 'anos' : 'meses'}.</p><table><tr><th>${modo === 'ano' ? 'Ano' : 'Mês'}</th>${cols.map(c => `<th>${c[0]}</th>`).join('')}<th></th></tr>${lin.reverse().join('')}</table>`;
+  };
+  document.querySelectorAll('#c-per button').forEach(bt => bt.onclick = () => { document.querySelectorAll('#c-per button').forEach(x => x.setAttribute('aria-pressed', x === bt)); tab(bt.dataset.p); });
+  tab('ano');
+}
+
+/* escolha de papel com busca (a lista do Android não abria) */
+function escolhePapel(cb, permiteNenhum) {
+  const lista = D.universo.slice().sort((x, y) => (x.extra ? 1 : 0) - (y.extra ? 1 : 0) || x.papel.localeCompare(y.papel));
+  $('#dlg-c').innerHTML = `<h2>Escolher ação</h2><input id="ep-b" type="search" autocomplete="off" placeholder="Código ou nome (ex.: PETR4, Vale)">
+    <div id="ep-l" class="lista" style="max-height:55vh;overflow:auto;margin-top:8px"></div>
+    <div class="lin">${permiteNenhum ? '<button class="btn sec" id="ep-0">Nenhuma</button>' : ''}<button class="btn sec" id="ep-x">Fechar</button></div>`;
+  const desenha = () => { const f = semAcento($('#ep-b').value.trim()); const l = lista.filter(u => !f || u.papel.includes(f) || semAcento(u.nome).includes(f)).slice(0, 80);
+    $('#ep-l').innerHTML = l.map(u => `<div class="item" data-tk="${u.papel}"><span class="tk">${nomeTk(u.papel)}</span><span class="nm">${u.nome}${u.extra ? '' : ' · do estudo'}</span></div>`).join('') || '<div class="vazio">Nada encontrado.</div>';
+    document.querySelectorAll('#ep-l .item').forEach(e => e.onclick = () => { $('#dlg').close(); cb(e.dataset.tk); }); };
+  $('#ep-b').oninput = desenha; $('#ep-x').onclick = () => $('#dlg').close(); if ($('#ep-0')) $('#ep-0').onclick = () => { $('#dlg').close(); cb(''); };
+  desenha(); $('#dlg').showModal(); setTimeout(() => $('#ep-b').focus(), 50);
 }
 
 /* rendimento por ano ou por mês: estratégia × comprar e segurar × IBOV × CDI */
